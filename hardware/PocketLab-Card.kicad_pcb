@@ -78381,7 +78381,7 @@
 		(uuid "cdb9997d-ec7a-4c58-9644-4e02144554ff")
 	)
 	(via
-		(at 79.6 58.5)
+		(at 80.8 61.2)
 		(size 0.45)
 		(drill 0.2)
 		(layers "F.Cu" "B.Cu")
@@ -78931,7 +78931,7 @@
 	)
 	(segment
 		(start 80.375 59.175)
-		(end 79.6 58.5)
+		(end 80.8 61.2)
 		(width 0.15)
 		(locked yes)
 		(layer "F.Cu")
@@ -78940,7 +78940,7 @@
 	)
 	(segment
 		(start 80.375 59.175)
-		(end 79.6 58.5)
+		(end 80.8 61.2)
 		(width 0.15)
 		(locked yes)
 		(layer "In1.Cu")
