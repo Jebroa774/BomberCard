@@ -73693,7 +73693,7 @@
 		(locked yes)
 		(layer "In2.Cu")
 		(net "/NFC_I0")
-		(uuid "b0882585-93b8-4852-94c3-d46d2be4f295")
+		(uuid "8164d9b4-d214-4874-afeb-09a1a0e35356")
 	)
 	(segment
 		(start 76.8125 50)
@@ -79087,7 +79087,7 @@
 		(locked yes)
 		(layer "In1.Cu")
 		(net "/VSYS")
-		(uuid "d26a94a5-fbc4-41a3-84fe-e4930b805ddc")
+		(uuid "7a5347c1-1e06-4fc4-a761-8c47619c964d")
 	)
 	(segment
 		(start 82.05 47.5)
