@@ -38735,7 +38735,7 @@
 	(footprint "Capacitor_SMD:C_0603_1608Metric"
 		(layer "B.Cu")
 		(uuid "8f974a5b-6562-4c5b-adf9-4ad87337c11a")
-		(at 78 33.335)
+		(at 78.5 33.335)
 		(descr "Capacitor SMD 0603 (1608 Metric), square (rectangular) end terminal, IPC-7351 nominal, (Body size source: IPC-SM-782 page 76, https://www.pcb-3d.com/wordpress/wp-content/uploads/ipc-sm-782a_amendment_1_and_2.pdf)")
 		(tags "capacitor")
 		(property "Reference" "C704"
@@ -55588,7 +55588,7 @@
 		(uuid "9eb0d9e1-c38f-43d7-a50b-306bea7b3d3a")
 	)
 	(segment
-		(start 78.775 33.335)
+		(start 79.275 33.335)
 		(end 79.1495 32.306)
 		(width 0.2)
 		(layer "B.Cu")
@@ -61761,7 +61761,7 @@
 		(uuid "768b1246-dd1d-4bf8-b478-09980cf6874b")
 	)
 	(via
-		(at 77.225 33.335)
+		(at 77.725 33.335)
 		(size 0.45)
 		(drill 0.2)
 		(layers "F.Cu" "B.Cu")
@@ -62531,7 +62531,7 @@
 		(uuid "0e071654-a35e-4fcb-9801-21665b6569e6")
 	)
 	(segment
-		(start 77.225 33.335)
+		(start 77.725 33.335)
 		(end 87.3988 32.112499)
 		(width 0.4)
 		(locked yes)
@@ -62891,7 +62891,7 @@
 	)
 	(segment
 		(start 77.75 34.9375)
-		(end 77.225 33.335)
+		(end 77.725 33.335)
 		(width 0.4)
 		(locked yes)
 		(layer "In1.Cu")
@@ -64568,12 +64568,30 @@
 	)
 	(segment
 		(start 21.7 52.8)
+		(end 22.5 53.78)
+		(width 0.15)
+		(locked yes)
+		(layer "In1.Cu")
+		(net "/GPIO8")
+		(uuid "5e3f87c2-c937-4c4a-92f1-278c058d37e8")
+	)
+	(segment
+		(start 22.5 53.78)
+		(end 61.5 62.53)
+		(width 0.15)
+		(locked yes)
+		(layer "In1.Cu")
+		(net "/GPIO8")
+		(uuid "cf545e1e-5c65-4b0a-87ce-c87306e75ca8")
+	)
+	(segment
+		(start 61.5 62.53)
 		(end 62.35 61.92)
 		(width 0.15)
 		(locked yes)
 		(layer "In1.Cu")
 		(net "/GPIO8")
-		(uuid "0332f9f4-f702-4efc-821d-3277148b30e0")
+		(uuid "e8046336-b324-406c-9198-aa5ec9739d86")
 	)
 	(segment
 		(start 26.575 21.82)

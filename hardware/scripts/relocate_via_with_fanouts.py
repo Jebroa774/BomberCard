@@ -25,7 +25,6 @@ def main() -> int:
         "--fanout-layer",
         action="append",
         choices=("F.Cu", "B.Cu", "In1.Cu", "In2.Cu"),
-        required=True,
     )
     parser.add_argument("--fanout-width", type=float, default=0.15)
     parser.add_argument("--skip-fill-zones", action="store_true")
@@ -58,7 +57,8 @@ def main() -> int:
         "In1.Cu": pcbnew.In1_Cu,
         "In2.Cu": pcbnew.In2_Cu,
     }
-    for layer_name in dict.fromkeys(args.fanout_layer):
+    fanout_layers = list(dict.fromkeys(args.fanout_layer or []))
+    for layer_name in fanout_layers:
         fanout = pcbnew.PCB_TRACK(board)
         fanout.SetStart(old)
         fanout.SetEnd(new)
@@ -84,7 +84,7 @@ def main() -> int:
         )
     print(
         f"MOVED via={args.via_uuid} to=({args.x:.4f},{args.y:.4f}) "
-        f"fanouts={','.join(dict.fromkeys(args.fanout_layer))} opens={opens}"
+        f"fanouts={','.join(fanout_layers) or 'none'} opens={opens}"
     )
     return 0
 
