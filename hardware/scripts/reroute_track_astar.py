@@ -34,6 +34,11 @@ def main() -> int:
     parser.add_argument("--clearance", type=float, default=0.20)
     parser.add_argument("--expansion", type=float, default=20.0)
     parser.add_argument("--pad-obstacles-only", action="store_true")
+    parser.add_argument(
+        "--static-obstacles-only",
+        action="store_true",
+        help="avoid pads, vias and keepouts while allowing later crossing cleanup",
+    )
     parser.add_argument("--ignore-endpoint-cages", action="store_true")
     parser.add_argument("--fill-zones", action="store_true")
     parser.add_argument("--require-zero-open", action="store_true")
@@ -64,8 +69,9 @@ def main() -> int:
         for obstacle in obstacles
         if obstacle.net != net_name
         and (
-            not args.pad_obstacles_only
+            not (args.pad_obstacles_only or args.static_obstacles_only)
             or obstacle.kind in {"pad", "keepout", "copper_graphic"}
+            or (args.static_obstacles_only and obstacle.kind == "via")
         )
     ]
     maze.GRID_MM = args.grid
