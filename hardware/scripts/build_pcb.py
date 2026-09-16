@@ -179,7 +179,6 @@ FIXED_PLACEMENTS: tuple[FixedPlacement, ...] = (
     # Preserve accessible power probing without occupying the back-side LF
     # island.  These are low-speed service pads and therefore live on F.Cu.
     FixedPlacement("TP104", "F", 36.0, 72.0),
-    FixedPlacement("TP106", "F", 38.5, 62.2),
     FixedPlacement("TP107", "F", 41.0, 62.2),
     # Keep the displaced microSD pull-up in the back-side row between the LF
     # trim bank and clock source; the other two pull-ups retain their sites.
@@ -979,7 +978,7 @@ def refs(*values: str) -> set[str]:
 
 POWER_USB = refs("R101", "R102", "R103", "C101", "F1", "D101", "U16")
 POWER_PROTECTION = refs(
-    "R104", "C102", "R105", "R106", "R107", "TP101", "TP102", "TP103", "TP104"
+    "R104", "C102", "R105", "R106", "R107", "TP101", "TP102", "TP104"
 )
 POWER_CHARGER = refs(
     "R108", "R109", "R110", "R111", "R112", "R113", "R114", "R115", "R126", "R128",

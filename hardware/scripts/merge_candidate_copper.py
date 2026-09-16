@@ -66,7 +66,8 @@ def main() -> int:
         if isinstance(item, pcbnew.PCB_VIA):
             copy = pcbnew.PCB_VIA(base)
             copy.SetPosition(item.GetPosition())
-            copy.SetWidth(item.GetWidth())
+            # KiCad 10 requires a layer argument for PCB_VIA::GetWidth().
+            copy.SetWidth(item.GetWidth(pcbnew.F_Cu))
             copy.SetDrill(item.GetDrillValue())
             copy.SetViaType(item.GetViaType())
             copy.SetLayerPair(item.TopLayer(), item.BottomLayer())

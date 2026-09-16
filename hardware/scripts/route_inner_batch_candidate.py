@@ -66,8 +66,12 @@ def pad(board: pcbnew.BOARD, reference: str, number: str) -> pcbnew.PAD:
     if footprint is None:
         raise RuntimeError(f"Missing footprint: {reference}")
     matches = [item for item in footprint.Pads() if item.GetNumber() == number]
-    if len(matches) != 1:
-        raise RuntimeError(f"Expected one {reference}.{number} pad, got {len(matches)}")
+    if not matches:
+        raise RuntimeError(f"Expected {reference}.{number} pad, got none")
+    if len(matches) > 1 and len({item.GetNetname() for item in matches}) != 1:
+        raise RuntimeError(
+            f"Ambiguous duplicate {reference}.{number} pads on different nets"
+        )
     return matches[0]
 
 
@@ -669,6 +673,8 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--select", action="append")
+    parser.add_argument("--remove-track-uuid", action="append", default=[])
+    parser.add_argument("--replace-existing", action="store_true")
     parser.add_argument(
         "--route-layer",
         choices=("F.Cu", "In1.Cu", "B.Cu", "In2.Cu"),
@@ -692,8 +698,22 @@ def main() -> int:
         raise RuntimeError(f"Output exists; use --force: {output_path}")
 
     board = pcbnew.LoadBoard(str(input_path))
-    edge = router.board_rect(board)
+    remove_ids = set(args.remove_track_uuid)
+    try:
+        edge = router.board_rect(board)
+    except AttributeError:
+        # KiCad 10's Windows SWIG wrapper can expose BOX2I as an opaque
+        # SwigPyObject when helper modules were imported first.
+        edge = router.Rect(20.20, 19.82, 105.80, 73.80)
     obstacles = router.existing_obstacles(board)
+    for item in list(board.GetTracks()):
+        item_uuid = (
+            item.m_Uuid.AsString()
+            if hasattr(item.m_Uuid, "AsString")
+            else str(item.m_Uuid)
+        )
+        if item_uuid in remove_ids:
+            board.Remove(item)
     selected = set(args.select or ())
     route_layer = {
         "F.Cu": pcbnew.F_Cu,
@@ -713,7 +733,7 @@ def main() -> int:
         second = pad(board, second_ref, second_num)
         if first.GetNetname() != net_name or second.GetNetname() != net_name:
             raise RuntimeError(f"Endpoint net mismatch: {label}")
-        if connected(board, first, second):
+        if connected(board, first, second) and not args.replace_existing:
             print(f"ALREADY {label}", flush=True)
             continue
         result = route_pad_pair(

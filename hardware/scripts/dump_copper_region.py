@@ -8,6 +8,11 @@ from pathlib import Path
 import pcbnew
 
 
+def uuid_text(item: pcbnew.BOARD_ITEM) -> str:
+    value = item.m_Uuid
+    return value.AsString() if hasattr(value, "AsString") else str(value)
+
+
 def mm(value: int) -> float:
     return pcbnew.ToMM(value)
 
@@ -67,14 +72,16 @@ def main() -> int:
         if isinstance(item, pcbnew.PCB_VIA):
             pos = point_mm(item.GetPosition())
             print(
-                f"VIA net={item.GetNetname()} pos={pos[0]:.4f},{pos[1]:.4f} "
+                f"VIA uuid={uuid_text(item)} net={item.GetNetname()} "
+                f"pos={pos[0]:.4f},{pos[1]:.4f} "
                 f"diam={mm(item.GetWidth(pcbnew.F_Cu)):.4f} drill={mm(item.GetDrillValue()):.4f}"
             )
         elif item.GetLayer() in selected:
             start = point_mm(item.GetStart())
             end = point_mm(item.GetEnd())
             print(
-                f"TRACK net={item.GetNetname()} layer={board.GetLayerName(item.GetLayer())} "
+                f"TRACK uuid={uuid_text(item)} net={item.GetNetname()} "
+                f"layer={board.GetLayerName(item.GetLayer())} "
                 f"start={start[0]:.4f},{start[1]:.4f} end={end[0]:.4f},{end[1]:.4f} "
                 f"width={mm(item.GetWidth()):.4f}"
             )

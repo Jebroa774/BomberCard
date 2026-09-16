@@ -18,6 +18,33 @@ from route_plane_fanouts import board_rect, existing_obstacles
 
 
 NET_RE = re.compile(r"\[([^\]]+)\]")
+COPPER_ORDER = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+
+
+def extend_layer_transition(
+    route: list[tuple[float, float, int]],
+    position: tuple[float, float],
+    target_layer: int,
+) -> None:
+    """Append a manufacturable layer transition at one XY position.
+
+    KiCad represents a non-adjacent 0.30/0.10-mm jump as an undersized
+    through-via.  Walk inner-layer transitions one adjacent copper pair at a
+    time so ``add_route`` creates stacked microvias instead.  Keep a direct
+    F.Cu/B.Cu jump intact because that is an ordinary through-via and callers
+    may deliberately select production-size dimensions for it.
+    """
+    source_layer = route[-1][2]
+    if source_layer == target_layer:
+        return
+    if {source_layer, target_layer} == {pcbnew.F_Cu, pcbnew.B_Cu}:
+        route.append((position[0], position[1], target_layer))
+        return
+    source_index = COPPER_ORDER.index(source_layer)
+    target_index = COPPER_ORDER.index(target_layer)
+    step = 1 if target_index > source_index else -1
+    for index in range(source_index + step, target_index + step, step):
+        route.append((position[0], position[1], COPPER_ORDER[index]))
 
 
 def item_layers(description: str) -> set[int]:
@@ -46,6 +73,7 @@ def escape_paths_to_vias(
     net_name: str,
     start: tuple[float, float],
     layer: int,
+    route_layer: int,
     edge,
     obstacles,
     maximum_paths: int = 4,
@@ -57,20 +85,56 @@ def escape_paths_to_vias(
     # item's clearance halo.  Permit only the first millimetre to leave that
     # pre-existing cage; via placement and the remainder of the route still
     # use the full obstacle set.
+    def cages_start_without_touching(obstacle) -> bool:
+        route_radius = maze.DIFFERENT_NET_CLEARANCE_MM + maze.TRACK_WIDTH_MM / 2.0
+        if obstacle.kind == "pad":
+            pad_rect = obstacle.geometry
+            return (
+                obstacle.net != net_name
+                and not pad_rect.contains(start)
+                and pad_rect.expanded(route_radius).contains(start)
+            )
+        if obstacle.kind == "track":
+            obstacle_start, obstacle_end, radius, obstacle_layer = obstacle.geometry
+            separation = maze.point_segment_distance(start, obstacle_start, obstacle_end)
+            return (
+                obstacle.net != net_name
+                and obstacle_layer == layer
+                and radius + 1e-6 < separation <= radius + route_radius + 1e-6
+            )
+        if obstacle.kind == "via":
+            center, radius = obstacle.geometry
+            separation = maze.distance(start, center)
+            return (
+                obstacle.net != net_name
+                and radius + 1e-6 < separation <= radius + route_radius + 1e-6
+            )
+        return False
+
     start_blockers = {
         id(obstacle)
         for obstacle in local_obstacles
-        if maze.obstacle_rect(obstacle)
-        .expanded(maze.DIFFERENT_NET_CLEARANCE_MM)
-        .contains(start)
+        if cages_start_without_touching(obstacle)
     }
-    step = 0.20
+    # Honour the caller's routing grid here as well.  A fixed 0.20-mm escape
+    # grid skips the only legal via approaches in several 0.50/0.65-mm-pitch
+    # component fields even though the long-section maze is running at 0.05
+    # or 0.10 mm.
+    step = min(0.20, maze.GRID_MM)
     maximum_radius = 10.0
     queue: list[tuple[float, int, int]] = [(0.0, 0, 0)]
     cost: dict[tuple[int, int], float] = {(0, 0): 0.0}
     previous: dict[tuple[int, int], tuple[int, int]] = {}
     result: list[tuple[tuple[tuple[float, float], ...], tuple[float, float]]] = []
     result_positions: list[tuple[float, float]] = []
+    copper_order = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+    first_index = copper_order.index(layer)
+    second_index = copper_order.index(route_layer)
+    via_layers = set(
+        copper_order[
+            min(first_index, second_index) : max(first_index, second_index) + 1
+        ]
+    )
     directions = (
         (1, 0),
         (-1, 0),
@@ -93,6 +157,7 @@ def escape_paths_to_vias(
             endpoint_pad_ids=set(),
             edge=edge,
             obstacles=spatial.query_point(current),
+            via_layers=via_layers,
         ):
             if all(math.dist(current, position) >= 0.90 for position in result_positions):
                 keys = [key]
@@ -154,14 +219,17 @@ def find_alternate_layer_route(
     edge,
     obstacles,
     expansion: float,
+    maximum_escape_paths: int = 2,
 ) -> tuple[tuple[float, float, int], ...] | None:
     """Escape twice and use another copper layer for the long section."""
     start_escapes = escape_paths_to_vias(
         net_name=net_name,
         start=start,
         layer=native_layer,
+        route_layer=route_layer,
         edge=edge,
         obstacles=obstacles,
+        maximum_paths=maximum_escape_paths,
     )
     if not start_escapes:
         return None
@@ -169,8 +237,10 @@ def find_alternate_layer_route(
         net_name=net_name,
         start=end,
         layer=native_layer,
+        route_layer=route_layer,
         edge=edge,
         obstacles=obstacles,
+        maximum_paths=maximum_escape_paths,
     )
     pairs = sorted(
         (
@@ -200,9 +270,9 @@ def find_alternate_layer_route(
         route: list[tuple[float, float, int]] = [
             (x, y, native_layer) for x, y in start_path
         ]
-        route.append((start_via[0], start_via[1], route_layer))
+        extend_layer_transition(route, start_via, route_layer)
         route.extend((x, y, route_layer) for x, y in middle[1:])
-        route.append((end_via[0], end_via[1], native_layer))
+        extend_layer_transition(route, end_via, native_layer)
         route.extend((x, y, native_layer) for x, y in reversed(end_path[:-1]))
         return tuple(route)
     return None
@@ -224,6 +294,7 @@ def find_layer_transition_route(
         net_name=net_name,
         start=start,
         layer=start_layer,
+        route_layer=end_layer,
         edge=edge,
         obstacles=obstacles,
         maximum_paths=8,
@@ -232,6 +303,7 @@ def find_layer_transition_route(
         net_name=net_name,
         start=end,
         layer=end_layer,
+        route_layer=start_layer,
         edge=edge,
         obstacles=obstacles,
         maximum_paths=8,
@@ -261,7 +333,7 @@ def find_layer_transition_route(
         if middle is None:
             continue
         route = [(x, y, start_layer) for x, y in start_path]
-        route.append((start_via[0], start_via[1], end_layer))
+        extend_layer_transition(route, start_via, end_layer)
         route.extend((x, y, end_layer) for x, y in middle[1:])
         route.extend((x, y, end_layer) for x, y in reversed(end_path[:-1]))
         return tuple(route)
@@ -280,7 +352,7 @@ def find_layer_transition_route(
             continue
         route = [(x, y, start_layer) for x, y in start_path]
         route.extend((x, y, start_layer) for x, y in middle[1:])
-        route.append((end_via[0], end_via[1], end_layer))
+        extend_layer_transition(route, end_via, end_layer)
         route.extend((x, y, end_layer) for x, y in reversed(end_path[:-1]))
         return tuple(route)
     return None
@@ -304,6 +376,8 @@ def main() -> int:
     parser.add_argument("--grid", type=float, default=0.20)
     parser.add_argument("--width", type=float, default=0.15)
     parser.add_argument("--clearance", type=float, default=0.20)
+    parser.add_argument("--via-diameter", type=float, default=0.30)
+    parser.add_argument("--via-drill", type=float, default=0.10)
     parser.add_argument("--expansion", type=float, default=16.0)
     parser.add_argument(
         "--max-search-states",
@@ -312,9 +386,31 @@ def main() -> int:
         help="cap the multilayer A* states per candidate",
     )
     parser.add_argument(
+        "--escape-paths",
+        type=int,
+        default=2,
+        help="maximum via escapes retained per endpoint for alternate-layer routing",
+    )
+    parser.add_argument(
         "--net",
         action="append",
         help="Route only this net; may be repeated",
+    )
+    parser.add_argument(
+        "--start-uuid",
+        help="explicit start pad UUID; requires --end-uuid and exactly one --net",
+    )
+    parser.add_argument(
+        "--end-uuid",
+        help="explicit end pad UUID; requires --start-uuid and exactly one --net",
+    )
+    parser.add_argument(
+        "--start-position",
+        help="explicit start as x,y,layer (for example 48.805,23.205,B.Cu)",
+    )
+    parser.add_argument(
+        "--end-position",
+        help="explicit end as x,y,layer; requires --start-position and one --net",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--pad-obstacles-only", action="store_true")
@@ -333,14 +429,84 @@ def main() -> int:
         action="store_true",
         help="ignore obstacle halos that already contain a reported endpoint",
     )
+    parser.add_argument(
+        "--ignore-all-endpoint-cages",
+        action="store_true",
+        help=(
+            "also ignore nearby pad/via halos at the two reported endpoints; "
+            "keepouts remain enforced and the result still requires full DRC"
+        ),
+    )
     parser.add_argument("--all-edges", action="store_true")
     parser.add_argument("--allow-vias", action="store_true")
+    parser.add_argument(
+        "--alternate-inner",
+        action="store_true",
+        help=(
+            "when a same-outer-layer edge is blocked, also try In2.Cu and "
+            "In1.Cu for the long section after DRC-aware endpoint escapes"
+        ),
+    )
+    parser.add_argument(
+        "--prefer-alternate-layer",
+        action="store_true",
+        help="try the via escape and alternate layers before a common native layer",
+    )
+    parser.add_argument(
+        "--direct-endpoint-vias",
+        action="store_true",
+        help=(
+            "for two endpoints on one outer layer, try through-vias directly "
+            "at both reported endpoints and route the middle on the opposite outer layer"
+        ),
+    )
+    parser.add_argument(
+        "--single-endpoint-via",
+        action="store_true",
+        help=(
+            "for an outer-layer SMD pad connected to a through-hole pad, "
+            "place one via at the SMD endpoint and finish on a selected inner layer"
+        ),
+    )
+    parser.add_argument(
+        "--prefer-ground-inner",
+        action="store_true",
+        help="when inner alternatives are enabled, try In1.Cu before In2.Cu",
+    )
+    parser.add_argument(
+        "--alternate-layer",
+        choices=("auto", "F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
+        default="auto",
+        help="restrict alternate-layer routing to one selected copper layer",
+    )
+    parser.add_argument(
+        "--routing-layer-set",
+        choices=("outer", "f-in1", "b-in2", "all"),
+        default="outer",
+        help="layers available to the full multilayer pad router",
+    )
     parser.add_argument(
         "--allow-power-selected",
         action="store_true",
         help="allow explicitly selected power nets that are normally skipped",
     )
     parser.add_argument("--skip-zone-fill", action="store_true")
+    parser.add_argument(
+        "--save-closest-partial",
+        action="store_true",
+        help="candidate mode: save the closest fully checked multilayer path on failure",
+    )
+    parser.add_argument(
+        "--adjacent-vias-only",
+        action="store_true",
+        help="restrict layer changes to adjacent-layer microvias",
+    )
+    parser.add_argument(
+        "--min-moves-between-vias",
+        type=int,
+        default=0,
+        help="minimum grid moves between consecutive layer transitions",
+    )
     args = parser.parse_args()
 
     output = args.output.resolve()
@@ -352,8 +518,27 @@ def main() -> int:
     board = pcbnew.LoadBoard(str(args.input.resolve()))
     report = json.loads(args.drc.read_text(encoding="utf-8"))
     selected_nets = set(args.net or ())
+    if bool(args.start_uuid) != bool(args.end_uuid):
+        raise RuntimeError("--start-uuid and --end-uuid must be supplied together")
+    if bool(args.start_position) != bool(args.end_position):
+        raise RuntimeError(
+            "--start-position and --end-position must be supplied together"
+        )
+    if args.start_uuid and args.start_position:
+        raise RuntimeError("explicit UUIDs and explicit positions are mutually exclusive")
+    explicit_endpoints = bool(args.start_uuid or args.start_position)
+    if explicit_endpoints and len(selected_nets) != 1:
+        raise RuntimeError("explicit endpoints require exactly one --net")
+
+    routing_layers = {pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu}
+    pads_by_uuid = {
+        pad.m_Uuid.AsString(): pad
+        for footprint in board.GetFootprints()
+        for pad in footprint.Pads()
+    }
     candidates = []
-    for open_item in report.get("unconnected_items", []):
+    report_items = () if explicit_endpoints else report.get("unconnected_items", [])
+    for open_item in report_items:
         items = open_item.get("items", [])
         if len(items) != 2:
             continue
@@ -376,7 +561,6 @@ def main() -> int:
         start_layers = item_layers(items[0].get("description", ""))
         end_layers = item_layers(items[1].get("description", ""))
         layers = start_layers & end_layers
-        routing_layers = {pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu}
         has_layer_transition = bool(
             args.allow_vias
             and not layers
@@ -402,25 +586,101 @@ def main() -> int:
                     items[1].get("uuid", ""),
                 )
             )
+    if args.start_uuid:
+        start_pad = pads_by_uuid.get(args.start_uuid)
+        end_pad = pads_by_uuid.get(args.end_uuid)
+        if start_pad is None or end_pad is None:
+            missing = [
+                uuid
+                for uuid, pad in (
+                    (args.start_uuid, start_pad),
+                    (args.end_uuid, end_pad),
+                )
+                if pad is None
+            ]
+            raise RuntimeError(f"explicit pad UUID not found: {', '.join(missing)}")
+        net_name = next(iter(selected_nets))
+        for label, pad in (("start", start_pad), ("end", end_pad)):
+            if pad.GetNetname() != net_name:
+                raise RuntimeError(
+                    f"explicit {label} pad belongs to {pad.GetNetname()}, not {net_name}"
+                )
+        start_pos = start_pad.GetPosition()
+        end_pos = end_pad.GetPosition()
+        start = (pcbnew.ToMM(start_pos.x), pcbnew.ToMM(start_pos.y))
+        end = (pcbnew.ToMM(end_pos.x), pcbnew.ToMM(end_pos.y))
+        start_layers = set(start_pad.GetLayerSet().Seq()) & routing_layers
+        end_layers = set(end_pad.GetLayerSet().Seq()) & routing_layers
+        layers = start_layers & end_layers
+        if not layers and not args.allow_vias:
+            raise RuntimeError("explicit endpoint pads require vias but --allow-vias is off")
+        candidates.append(
+            (
+                math.dist(start, end),
+                net_name,
+                start,
+                end,
+                layers,
+                start_layers,
+                end_layers,
+                args.start_uuid,
+                args.end_uuid,
+            )
+        )
+    elif args.start_position:
+        layer_ids = {
+            "F.Cu": pcbnew.F_Cu,
+            "In1.Cu": pcbnew.In1_Cu,
+            "In2.Cu": pcbnew.In2_Cu,
+            "B.Cu": pcbnew.B_Cu,
+        }
+
+        def parse_position(value: str) -> tuple[tuple[float, float], set[int]]:
+            parts = [part.strip() for part in value.split(",")]
+            if len(parts) != 3 or parts[2] not in layer_ids:
+                raise RuntimeError("explicit positions must use x,y,F.Cu|In1.Cu|In2.Cu|B.Cu")
+            return (float(parts[0]), float(parts[1])), {layer_ids[parts[2]]}
+
+        start, start_layers = parse_position(args.start_position)
+        end, end_layers = parse_position(args.end_position)
+        layers = start_layers & end_layers
+        candidates.append(
+            (
+                math.dist(start, end),
+                next(iter(selected_nets)),
+                start,
+                end,
+                layers,
+                start_layers,
+                end_layers,
+                "",
+                "",
+            )
+        )
     candidates.sort(key=lambda item: (item[0], item[1]))
     if args.candidate_offset:
         candidates = candidates[args.candidate_offset :]
 
     maze.GRID_MM = args.grid
     maze.TRACK_WIDTH_MM = args.width
+    maze.VIA_DIAMETER_MM = args.via_diameter
+    maze.VIA_DRILL_MM = args.via_drill
     maze.DIFFERENT_NET_CLEARANCE_MM = args.clearance
     plane.DIFFERENT_NET_CLEARANCE_MM = args.clearance
     maze.ROUTE_EXPANSION_MM = args.expansion
     maze.MAX_ROUTE_SEARCH_STATES = args.max_search_states
     maze.MAX_FIXED_LAYER_SEARCH_STATES = args.max_search_states
+    maze.ROUTING_LAYERS = {
+        "outer": (pcbnew.F_Cu, pcbnew.B_Cu),
+        "f-in1": (pcbnew.F_Cu, pcbnew.In1_Cu),
+        "b-in2": (pcbnew.B_Cu, pcbnew.In2_Cu),
+        "all": (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu),
+    }[args.routing_layer_set]
+    maze.ADJACENT_LAYER_VIAS_ONLY = args.adjacent_vias_only
+    maze.MIN_MOVES_BETWEEN_VIAS = args.min_moves_between_vias
     maze.AVOID_L3_ZONE_POLYS = ()
     edge = board_rect(board)
     obstacles = existing_obstacles(board)
-    pads_by_uuid = {
-        pad.m_Uuid.AsString(): pad
-        for footprint in board.GetFootprints()
-        for pad in footprint.Pads()
-    }
     used_nets: set[str] = set()
     attempts = 0
     routed = 0
@@ -456,17 +716,21 @@ def main() -> int:
         routing_obstacles = [
             obstacle
             for obstacle in obstacles
-            if (obstacle.net != net_name or obstacle.kind == "via")
+            if obstacle.net != net_name
             and (
                 not args.pad_obstacles_only
                 or obstacle.kind in {"pad", "keepout", "copper_graphic"}
             )
         ]
-        if args.ignore_endpoint_cages:
+        if args.ignore_endpoint_cages or args.ignore_all_endpoint_cages:
             routing_obstacles = [
                 obstacle
                 for obstacle in routing_obstacles
-                if obstacle.kind in {"pad", "via", "keepout"}
+                if obstacle.kind == "keepout"
+                or (
+                    not args.ignore_all_endpoint_cages
+                    and obstacle.kind in {"pad", "via"}
+                )
                 or (
                     not maze.obstacle_rect(obstacle)
                     .expanded(args.clearance + args.width / 2.0)
@@ -476,10 +740,336 @@ def main() -> int:
                     .contains(end)
                 )
             ]
+        if args.direct_endpoint_vias and len(layers) == 1:
+            native_layer = next(iter(layers))
+            if native_layer in {pcbnew.F_Cu, pcbnew.B_Cu}:
+                start_pad = pads_by_uuid.get(start_uuid)
+                end_pad = pads_by_uuid.get(end_uuid)
+                if args.alternate_layer != "auto":
+                    route_layer = {
+                        "F.Cu": pcbnew.F_Cu,
+                        "In1.Cu": pcbnew.In1_Cu,
+                        "In2.Cu": pcbnew.In2_Cu,
+                        "B.Cu": pcbnew.B_Cu,
+                    }[args.alternate_layer]
+                else:
+                    route_layer = (
+                        pcbnew.B_Cu if native_layer == pcbnew.F_Cu else pcbnew.F_Cu
+                    )
+                if route_layer == native_layer:
+                    route_layer = (
+                        pcbnew.B_Cu if native_layer == pcbnew.F_Cu else pcbnew.F_Cu
+                    )
+                via_layers = {native_layer, route_layer}
+                endpoint_vias_clear = all(
+                    maze.signal_via_is_clear(
+                        net_name=net_name,
+                        position=position,
+                        endpoint_pad_ids=set(),
+                        edge=edge,
+                        obstacles=routing_obstacles,
+                        via_layers=via_layers,
+                    )
+                    for position in (start, end)
+                )
+                if not endpoint_vias_clear:
+                    for label, position in (("start", start), ("end", end)):
+                        clear_here = maze.signal_via_is_clear(
+                            net_name=net_name,
+                            position=position,
+                            endpoint_pad_ids=set(),
+                            edge=edge,
+                            obstacles=routing_obstacles,
+                            via_layers=via_layers,
+                        )
+                        print(
+                            f"DIRECT-ENDPOINT-VIA {net_name}: {label} "
+                            f"{position[0]:.3f},{position[1]:.3f} clear={clear_here}",
+                            flush=True,
+                        )
+                        if not clear_here:
+                            for obstacle in routing_obstacles:
+                                if not maze.signal_via_is_clear(
+                                    net_name=net_name,
+                                    position=position,
+                                    endpoint_pad_ids=set(),
+                                    edge=edge,
+                                    obstacles=[obstacle],
+                                    via_layers=via_layers,
+                                ):
+                                    owner = obstacle.owner
+                                    owner_uuid = (
+                                        owner.m_Uuid.AsString()
+                                        if owner is not None and hasattr(owner, "m_Uuid")
+                                        else ""
+                                    )
+                                    print(
+                                        f"  VIA_BLOCKER kind={obstacle.kind} "
+                                        f"net={obstacle.net} uuid={owner_uuid}",
+                                        flush=True,
+                                    )
+                if endpoint_vias_clear:
+                    middle = maze.find_fixed_layer_path(
+                        net_name=net_name,
+                        start=start,
+                        end=end,
+                        layer=route_layer,
+                        endpoint_pad_ids=set(),
+                        edge=edge,
+                        obstacles=routing_obstacles,
+                        expansion=args.expansion,
+                    )
+                    middle_route = None
+                    if middle is None and start_pad is not None and end_pad is not None:
+                        middle_route = maze.find_route(
+                            net_name=net_name,
+                            start_pad=start_pad,
+                            end_pad=end_pad,
+                            edge=edge,
+                            obstacles=routing_obstacles,
+                            start_override=start,
+                            end_override=end,
+                            start_layer_override=route_layer,
+                            end_layer_override=route_layer,
+                        )
+                    if middle is not None or middle_route is not None:
+                        direct_route_list = [(start[0], start[1], native_layer)]
+                        extend_layer_transition(direct_route_list, start, route_layer)
+                        if middle is not None:
+                            direct_route_list.extend(
+                                (x, y, route_layer) for x, y in middle[1:]
+                            )
+                        else:
+                            direct_route_list.extend(middle_route[1:])
+                        extend_layer_transition(direct_route_list, end, native_layer)
+                        direct_route = tuple(direct_route_list)
+                        tracks, vias = maze.add_route(
+                            board, net_name, direct_route, obstacles
+                        )
+                        routed += 1
+                        if not args.all_edges:
+                            used_nets.add(net_name)
+                        save_checkpoint()
+                        print(
+                            f"ROUTED {net_name} ENDPOINT-VIAS "
+                            f"distance={distance:.2f} tracks={tracks} vias={vias}",
+                            flush=True,
+                        )
+                        continue
+        if args.single_endpoint_via and len(layers) == 1:
+            native_layer = next(iter(layers))
+            if native_layer in {pcbnew.F_Cu, pcbnew.B_Cu}:
+                start_pad = pads_by_uuid.get(start_uuid)
+                end_pad = pads_by_uuid.get(end_uuid)
+                if args.alternate_layer != "auto":
+                    route_layers = [{
+                        "F.Cu": pcbnew.F_Cu,
+                        "In1.Cu": pcbnew.In1_Cu,
+                        "In2.Cu": pcbnew.In2_Cu,
+                        "B.Cu": pcbnew.B_Cu,
+                    }[args.alternate_layer]]
+                else:
+                    route_layers = [pcbnew.In2_Cu, pcbnew.In1_Cu]
+                endpoint_pairs = []
+                if start_pad is not None and end_pad is not None:
+                    for route_layer in route_layers:
+                        if (
+                            start_pad.IsOnLayer(native_layer)
+                            and not start_pad.IsOnLayer(route_layer)
+                            and end_pad.IsOnLayer(route_layer)
+                        ):
+                            endpoint_pairs.append((start, end, route_layer, False))
+                        if (
+                            end_pad.IsOnLayer(native_layer)
+                            and not end_pad.IsOnLayer(route_layer)
+                            and start_pad.IsOnLayer(route_layer)
+                        ):
+                            endpoint_pairs.append((end, start, route_layer, True))
+                print(
+                    f"SINGLE-ENDPOINT-VIA {net_name}: native={native_layer} "
+                    f"pairs={len(endpoint_pairs)} start_pad={start_pad is not None} "
+                    f"end_pad={end_pad is not None}",
+                    flush=True,
+                )
+                single_route = None
+                for smd_position, tht_position, route_layer, reverse_route in endpoint_pairs:
+                    copper_order = tuple(COPPER_ORDER)
+                    first_index = copper_order.index(native_layer)
+                    second_index = copper_order.index(route_layer)
+                    via_layers = set(
+                        copper_order[
+                            min(first_index, second_index) : max(first_index, second_index) + 1
+                        ]
+                    )
+                    via_clear = maze.signal_via_is_clear(
+                        net_name=net_name,
+                        position=smd_position,
+                        endpoint_pad_ids=set(),
+                        edge=edge,
+                        obstacles=routing_obstacles,
+                        via_layers=via_layers,
+                    )
+                    print(
+                        f"SINGLE-ENDPOINT-VIA {net_name}: layer={route_layer} "
+                        f"via={smd_position[0]:.3f},{smd_position[1]:.3f} clear={via_clear}",
+                        flush=True,
+                    )
+                    if not via_clear:
+                        for obstacle in routing_obstacles:
+                            if not maze.signal_via_is_clear(
+                                net_name=net_name,
+                                position=smd_position,
+                                endpoint_pad_ids=set(),
+                                edge=edge,
+                                obstacles=[obstacle],
+                                via_layers=via_layers,
+                            ):
+                                owner = obstacle.owner
+                                owner_uuid = (
+                                    owner.m_Uuid.AsString()
+                                    if owner is not None and hasattr(owner, "m_Uuid")
+                                    else ""
+                                )
+                                print(
+                                    f"  VIA_BLOCKER kind={obstacle.kind} net={obstacle.net} "
+                                    f"uuid={owner_uuid}",
+                                    flush=True,
+                                )
+                        continue
+                    middle = maze.find_fixed_layer_path(
+                        net_name=net_name,
+                        start=smd_position,
+                        end=tht_position,
+                        layer=route_layer,
+                        endpoint_pad_ids=set(),
+                        edge=edge,
+                        obstacles=routing_obstacles,
+                        expansion=args.expansion,
+                    )
+                    route_list = [(smd_position[0], smd_position[1], native_layer)]
+                    extend_layer_transition(route_list, smd_position, route_layer)
+                    if middle is not None:
+                        route_list.extend((x, y, route_layer) for x, y in middle[1:])
+                    else:
+                        middle_route = maze.find_route(
+                            net_name=net_name,
+                            start_pad=start_pad if not reverse_route else end_pad,
+                            end_pad=end_pad if not reverse_route else start_pad,
+                            edge=edge,
+                            obstacles=routing_obstacles,
+                            start_override=smd_position,
+                            end_override=tht_position,
+                            start_layer_override=route_layer,
+                            end_layer_override=route_layer,
+                        )
+                        if middle_route is None:
+                            continue
+                        route_list.extend(middle_route[1:])
+                    if reverse_route:
+                        route_list.reverse()
+                    single_route = tuple(route_list)
+                    break
+                if single_route is not None:
+                    tracks, vias = maze.add_route(
+                        board, net_name, single_route, obstacles
+                    )
+                    routed += 1
+                    if not args.all_edges:
+                        used_nets.add(net_name)
+                    save_checkpoint()
+                    print(
+                        f"ROUTED {net_name} SINGLE-ENDPOINT-VIA "
+                        f"distance={distance:.2f} tracks={tracks} vias={vias}",
+                        flush=True,
+                    )
+                    continue
+        if (
+            args.prefer_alternate_layer
+            and args.allow_vias
+            and len(layers) == 1
+        ):
+            native_layer = next(iter(layers))
+            if native_layer in {pcbnew.F_Cu, pcbnew.B_Cu}:
+                if args.alternate_layer != "auto":
+                    alternate_layers = [{
+                        "F.Cu": pcbnew.F_Cu,
+                        "In1.Cu": pcbnew.In1_Cu,
+                        "In2.Cu": pcbnew.In2_Cu,
+                        "B.Cu": pcbnew.B_Cu,
+                    }[args.alternate_layer]]
+                else:
+                    alternate_layers = [
+                        pcbnew.B_Cu if native_layer == pcbnew.F_Cu else pcbnew.F_Cu,
+                    ]
+                if args.alternate_inner and args.alternate_layer == "auto":
+                    inner_layers = (
+                        [pcbnew.In1_Cu, pcbnew.In2_Cu]
+                        if args.prefer_ground_inner
+                        else [pcbnew.In2_Cu, pcbnew.In1_Cu]
+                    )
+                    alternate_layers = inner_layers + alternate_layers
+                preferred_route = None
+                for route_layer in alternate_layers:
+                    preferred_route = find_alternate_layer_route(
+                        net_name=net_name,
+                        start=start,
+                        end=end,
+                        native_layer=native_layer,
+                        route_layer=route_layer,
+                        edge=edge,
+                        obstacles=routing_obstacles,
+                        expansion=args.expansion,
+                        maximum_escape_paths=args.escape_paths,
+                    )
+                    if preferred_route is not None:
+                        break
+                if preferred_route is not None:
+                    tracks, vias = maze.add_route(
+                        board, net_name, preferred_route, obstacles
+                    )
+                    routed += 1
+                    if not args.all_edges:
+                        used_nets.add(net_name)
+                    save_checkpoint()
+                    print(
+                        f"ROUTED {net_name} VIA-PREFERRED distance={distance:.2f} "
+                        f"tracks={tracks} vias={vias}",
+                        flush=True,
+                    )
+                    continue
         if args.multilayer_pads:
             start_pad = pads_by_uuid.get(start_uuid)
             end_pad = pads_by_uuid.get(end_uuid)
             if start_pad is not None and end_pad is not None:
+                # Through-hole pads are present on both outer copper layers,
+                # so ``pad_layer`` intentionally returns no single layer for
+                # them.  For a THT-to-SMD open edge the other endpoint makes
+                # the intended outer start/end layer unambiguous.  Supplying
+                # that layer override lets the full multilayer maze route
+                # these valid pairs instead of skipping them outright.
+                route_layer_order = tuple(maze.ROUTING_LAYERS)
+
+                def endpoint_layer_override(
+                    pad: pcbnew.PAD,
+                    endpoint_layers: set[int],
+                    other_layers: set[int],
+                ) -> int | None:
+                    if maze.pad_layer(pad) is not None:
+                        return None
+                    available = endpoint_layers & set(route_layer_order)
+                    preferred = available & other_layers
+                    choices = preferred or available
+                    return next(
+                        (layer for layer in route_layer_order if layer in choices),
+                        None,
+                    )
+
+                start_layer_override = endpoint_layer_override(
+                    start_pad, start_layers, end_layers
+                )
+                end_layer_override = endpoint_layer_override(
+                    end_pad, end_layers, start_layers
+                )
                 try:
                     route = maze.find_route(
                         net_name=net_name,
@@ -487,6 +1077,9 @@ def main() -> int:
                         end_pad=end_pad,
                         edge=edge,
                         obstacles=routing_obstacles,
+                        start_layer_override=start_layer_override,
+                        end_layer_override=end_layer_override,
+                        allow_closest_partial=args.save_closest_partial,
                     )
                 except RuntimeError as error:
                     print(f"MULTI_SKIPPED {net_name}: {error}", flush=True)
@@ -556,9 +1149,26 @@ def main() -> int:
             if args.allow_vias and len(layers) == 1:
                 native_layer = next(iter(layers))
                 if native_layer in {pcbnew.F_Cu, pcbnew.B_Cu}:
-                    alternate_layers = [
-                        pcbnew.B_Cu if native_layer == pcbnew.F_Cu else pcbnew.F_Cu,
-                    ]
+                    if args.alternate_layer != "auto":
+                        alternate_layers = [{
+                            "F.Cu": pcbnew.F_Cu,
+                            "In1.Cu": pcbnew.In1_Cu,
+                            "In2.Cu": pcbnew.In2_Cu,
+                            "B.Cu": pcbnew.B_Cu,
+                        }[args.alternate_layer]]
+                    else:
+                        alternate_layers = [
+                            pcbnew.B_Cu if native_layer == pcbnew.F_Cu else pcbnew.F_Cu,
+                        ]
+                    if args.alternate_inner and args.alternate_layer == "auto":
+                        # Prefer the power plane over the ground plane so the
+                        # continuous return reference is disturbed only when
+                        # no other checked candidate exists.
+                        alternate_layers.extend(
+                            (pcbnew.In1_Cu, pcbnew.In2_Cu)
+                            if args.prefer_ground_inner
+                            else (pcbnew.In2_Cu, pcbnew.In1_Cu)
+                        )
                     for route_layer in alternate_layers:
                         route = find_alternate_layer_route(
                             net_name=net_name,
@@ -569,6 +1179,7 @@ def main() -> int:
                             edge=edge,
                             obstacles=routing_obstacles,
                             expansion=args.expansion,
+                            maximum_escape_paths=args.escape_paths,
                         )
                         if route is not None:
                             break

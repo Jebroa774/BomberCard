@@ -21,7 +21,17 @@ def main() -> int:
     parser.add_argument("--reference", required=True)
     parser.add_argument("--x", type=float, required=True)
     parser.add_argument("--y", type=float, required=True)
+    parser.add_argument(
+        "--rotation",
+        type=float,
+        help="set the absolute footprint rotation in degrees",
+    )
     parser.add_argument("--skip-fill-zones", action="store_true")
+    parser.add_argument(
+        "--allow-existing-opens",
+        action="store_true",
+        help="permit the input board's pre-existing unrouted connections",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -39,13 +49,22 @@ def main() -> int:
     if footprint is None:
         raise RuntimeError(f"missing footprint: {args.reference}")
 
-    old_footprint_position = footprint.GetPosition()
     new_footprint_position = pcbnew.VECTOR2I_MM(args.x, args.y)
-    delta = new_footprint_position - old_footprint_position
-    pad_moves = [
-        (pad.GetNetCode(), pad.GetPosition(), pad.GetPosition() + delta)
+    old_pads = [
+        (pad, pad.GetNetCode(), pad.GetPosition())
         for pad in footprint.Pads()
         if pad.GetNetCode()
+    ]
+
+    # Transform the footprint first, then read each pad's actual transformed
+    # position.  This keeps attached copper correct for rotations as well as
+    # simple translations.
+    footprint.SetPosition(new_footprint_position)
+    if args.rotation is not None:
+        footprint.SetOrientationDegrees(args.rotation)
+    pad_moves = [
+        (net_code, old_pad_position, pad.GetPosition())
+        for pad, net_code, old_pad_position in old_pads
     ]
 
     moved_vias: set[str] = set()
@@ -66,7 +85,6 @@ def main() -> int:
                 item.SetEnd(new_pad_position)
                 moved_track_ends += 1
 
-    footprint.SetPosition(new_footprint_position)
     if not args.skip_fill_zones:
         pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
@@ -74,7 +92,7 @@ def main() -> int:
     connectivity = board.GetConnectivity()
     connectivity.RecalculateRatsnest()
     opens = int(connectivity.GetUnconnectedCount(False))
-    if opens:
+    if opens and not args.allow_existing_opens:
         raise RuntimeError(f"footprint move created {opens} open connection(s)")
 
     pcbnew.SaveBoard(str(output_path), board)
@@ -84,6 +102,7 @@ def main() -> int:
         )
     print(
         f"MOVED reference={args.reference} to=({args.x:.4f},{args.y:.4f}) "
+        f"rotation={footprint.GetOrientationDegrees():.1f} "
         f"vias={len(moved_vias)} track_ends={moved_track_ends} opens={opens}"
     )
     return 0

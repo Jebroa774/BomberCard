@@ -1,4 +1,19 @@
-# Work checkpoint — 2026-08-30
+# Work checkpoint — 2026-09-16
+
+## Current authoritative routing state — 2026-09-16
+
+- The authoritative board is `hardware/PocketLab-Card.kicad_pcb`.
+- KiCad connectivity reports **33 open connection items**.
+- A fresh KiCad 10 DRC run reports **0 geometric/electrical violations** and
+  **7 footprint-library comparison notices**.
+- The board currently contains 264 footprints, 4,863 track segments, 1,019
+  vias and 24 zones.
+- Current top, bottom and isometric renders plus an interactive GLB viewer are
+  stored under `docs/design-overview/`.
+- This is a safe routing checkpoint, not an order-ready fabrication release.
+
+The dated notes below document older routing phases and are retained as design
+history; their connection and DRC counts are no longer the current status.
 
 ## Routing/DRC continuation — 2026-08-30
 

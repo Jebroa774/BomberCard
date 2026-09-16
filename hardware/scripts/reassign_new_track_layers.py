@@ -102,35 +102,57 @@ def occupied_layers(item: pcbnew.BOARD_ITEM) -> set[int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=Path, required=True)
+    parser.add_argument("--base", type=Path)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--drc", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--allow-inner", action="store_true")
+    parser.add_argument(
+        "--shorts-only",
+        action="store_true",
+        help="consider every shorting track with all-layer anchors, without a base board",
+    )
     parser.add_argument("--clearance", type=float, default=0.16)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     hardware_dir = Path(__file__).resolve().parent.parent
     authoritative = (hardware_dir / "PocketLab-Card.kicad_pcb").resolve()
-    if args.output.resolve() in {
-        authoritative,
-        args.base.resolve(),
-        args.candidate.resolve(),
-    }:
+    protected = {authoritative, args.candidate.resolve()}
+    if args.base:
+        protected.add(args.base.resolve())
+    if args.output.resolve() in protected:
         raise RuntimeError("output must be a separate non-authoritative board")
     if args.output.exists() and not args.force:
         raise RuntimeError(f"output exists: {args.output}")
 
-    base = pcbnew.LoadBoard(str(args.base.resolve()))
     candidate = pcbnew.LoadBoard(str(args.candidate.resolve()))
-    base_keys = {geometry_key(item) for item in base.GetTracks()}
-    candidate_added_tracks = {
-        uuid_text(item): item
-        for item in candidate.GetTracks()
-        if not isinstance(item, pcbnew.PCB_VIA)
-        and geometry_key(item) not in base_keys
-    }
+    report = json.loads(args.drc.read_text(encoding="utf-8"))
+    if args.shorts_only:
+        short_track_ids = {
+            item.get("uuid", "")
+            for violation in report.get("violations", [])
+            if violation.get("type") == "shorting_items"
+            for item in violation.get("items", [])
+            if item.get("description", "").startswith("Leiterbahn ")
+        }
+        candidate_added_tracks = {
+            uuid_text(item): item
+            for item in candidate.GetTracks()
+            if not isinstance(item, pcbnew.PCB_VIA)
+            and uuid_text(item) in short_track_ids
+        }
+    else:
+        if not args.base:
+            raise RuntimeError("--base is required unless --shorts-only is used")
+        base = pcbnew.LoadBoard(str(args.base.resolve()))
+        base_keys = {geometry_key(item) for item in base.GetTracks()}
+        candidate_added_tracks = {
+            uuid_text(item): item
+            for item in candidate.GetTracks()
+            if not isinstance(item, pcbnew.PCB_VIA)
+            and geometry_key(item) not in base_keys
+        }
     all_layer_anchors: set[tuple[int, int, int]] = set()
     for item in candidate.GetTracks():
         if isinstance(item, pcbnew.PCB_VIA):
@@ -171,7 +193,6 @@ def main() -> int:
 
     pair_weights: Counter[tuple[str, str]] = Counter()
     fixed_penalties: dict[str, Counter[int]] = defaultdict(Counter)
-    report = json.loads(args.drc.read_text(encoding="utf-8"))
     for violation in report.get("violations", []):
         if violation.get("type") not in DRC_TYPES:
             continue

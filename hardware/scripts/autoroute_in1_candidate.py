@@ -153,10 +153,12 @@ class GridRouter:
         board: pcbnew.BOARD,
         route_layer: int,
         step: float = GRID_STEP,
+        block_in2_power_zones: bool = True,
     ) -> None:
         self.board = board
         self.route_layer = route_layer
         self.step = step
+        self.block_in2_power_zones = block_in2_power_zones
         bbox = board.GetBoardEdgesBoundingBox()
         self.xmin = mm(bbox.GetX())
         self.ymin = mm(bbox.GetY())
@@ -234,7 +236,11 @@ class GridRouter:
                     "__BLOCK__",
                 )
 
-        for zone in self.board.Zones() if self.route_layer == pcbnew.In2_Cu else ():
+        for zone in (
+            self.board.Zones()
+            if self.route_layer == pcbnew.In2_Cu and self.block_in2_power_zones
+            else ()
+        ):
             if (
                 zone.GetNetname() not in {"/+5V_RAW", "/+5V_AUX"}
                 or not zone.HasFilledPolysForLayer(pcbnew.In2_Cu)
@@ -970,6 +976,11 @@ def main() -> int:
     parser.add_argument("--clearance", type=float, default=CLEARANCE)
     parser.add_argument("--grid", type=float, default=GRID_STEP)
     parser.add_argument(
+        "--ignore-in2-power-zones",
+        action="store_true",
+        help="Allow routing through refillable +5V In2 zones; refill and DRC must validate the result",
+    )
+    parser.add_argument(
         "--manual-start",
         type=parse_xy,
         help="Use this X,Y point directly on --route-layer instead of a DRC endpoint",
@@ -1032,7 +1043,12 @@ def main() -> int:
     routed = 0
     if args.continue_on_failure:
         snapshot = args.output.with_name(args.output.stem + "-attempt.kicad_pcb")
-        router = GridRouter(board, route_layer, step=args.grid)
+        router = GridRouter(
+            board,
+            route_layer,
+            step=args.grid,
+            block_in2_power_zones=not args.ignore_in2_power_zones,
+        )
         for index, edge in enumerate(edges, start=1):
             pcbnew.SaveBoard(str(snapshot.resolve()), board)
             try:
@@ -1062,7 +1078,12 @@ def main() -> int:
                 )
         snapshot.unlink(missing_ok=True)
     else:
-        router = GridRouter(board, route_layer, step=args.grid)
+        router = GridRouter(
+            board,
+            route_layer,
+            step=args.grid,
+            block_in2_power_zones=not args.ignore_in2_power_zones,
+        )
         cache: dict[tuple[str, float, float, str], tuple[float, float]] = {}
         for edge in edges:
             transition_to_in2(board, router, edge.start, cache)

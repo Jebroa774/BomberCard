@@ -108,13 +108,19 @@ def add_via(
     board: pcbnew.BOARD,
     net: pcbnew.NETINFO_ITEM,
     position: tuple[float, float],
+    first_layer: int,
+    second_layer: int,
 ) -> None:
     via = pcbnew.PCB_VIA(board)
     via.SetPosition(pcbnew.VECTOR2I_MM(*position))
     via.SetWidth(pcbnew.FromMM(maze.VIA_DIAMETER_MM))
     via.SetDrill(pcbnew.FromMM(maze.VIA_DRILL_MM))
-    via.SetViaType(pcbnew.VIATYPE_THROUGH)
-    via.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+    inner_pair = {first_layer, second_layer} == {pcbnew.In1_Cu, pcbnew.In2_Cu}
+    via.SetViaType(pcbnew.VIATYPE_MICROVIA if inner_pair else pcbnew.VIATYPE_THROUGH)
+    via.SetLayerPair(
+        min(first_layer, second_layer) if inner_pair else pcbnew.F_Cu,
+        max(first_layer, second_layer) if inner_pair else pcbnew.B_Cu,
+    )
     via.SetNet(net)
     via.SetLocked(True)
     board.Add(via)
@@ -129,6 +135,16 @@ def main() -> int:
     parser.add_argument("--max-bridges", type=int, default=20)
     parser.add_argument("--via-diameter", type=float, default=0.45)
     parser.add_argument("--via-drill", type=float, default=0.20)
+    parser.add_argument(
+        "--allow-existing-victim",
+        action="store_true",
+        help="permit bridging the roomier pre-existing track at a crossing",
+    )
+    parser.add_argument(
+        "--prefer-existing-victim",
+        action="store_true",
+        help="when possible, bridge the pre-existing track instead of candidate copper",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -179,13 +195,23 @@ def main() -> int:
         candidates = [
             item
             for item in (first, second)
-            if uuid_text(item) in new_uuids and not isinstance(item, pcbnew.PCB_VIA)
+            if not isinstance(item, pcbnew.PCB_VIA)
+            and (
+                args.allow_existing_victim
+                or uuid_text(item) in new_uuids
+            )
         ]
         if not candidates:
             continue
         # Prefer bridging the longer newly added segment because it provides
         # more room to place both transition vias away from the crossing.
-        victim = max(candidates, key=lambda item: item.GetLength())
+        existing_candidates = [
+            item for item in candidates if uuid_text(item) not in new_uuids
+        ]
+        if args.prefer_existing_victim and existing_candidates:
+            victim = max(existing_candidates, key=lambda item: item.GetLength())
+        else:
+            victim = max(candidates, key=lambda item: item.GetLength())
         other = second if victim is first else first
         start = xy(victim.GetStart())
         end = xy(victim.GetEnd())
@@ -198,23 +224,31 @@ def main() -> int:
         length = math.dist(start, end)
         before = parameter * length
         after = (1.0 - parameter) * length
-        if before < 0.65 or after < 0.65:
+        if before < 0.28 or after < 0.28:
             continue
         direction = ((end[0] - start[0]) / length, (end[1] - start[1]) / length)
         perpendicular = (-direction[1], direction[0])
         original_layer = victim.GetLayer()
-        # A through via can leave any signal layer.  Try every other copper
-        # layer; the original implementation only swapped F.Cu/B.Cu and thus
-        # ignored the majority of crossings in this four-layer board.
-        bridge_layers = tuple(
-            layer for layer in routing_layers if layer != original_layer
-        )
+        # Prefer an outer signal layer for bridges that originate on an inner
+        # plane.  A through-via is larger than a blind transition, but it keeps
+        # the short bridge away from the dense inner-layer track bundle and is
+        # fully checked across every copper layer below.
+        if original_layer == pcbnew.F_Cu:
+            bridge_layers = (pcbnew.B_Cu,)
+        elif original_layer == pcbnew.B_Cu:
+            bridge_layers = (pcbnew.F_Cu,)
+        elif original_layer == pcbnew.In1_Cu:
+            bridge_layers = (pcbnew.B_Cu, pcbnew.F_Cu, pcbnew.In2_Cu)
+        elif original_layer == pcbnew.In2_Cu:
+            bridge_layers = (pcbnew.F_Cu, pcbnew.B_Cu, pcbnew.In1_Cu)
+        else:
+            bridge_layers = ()
         obstacles = existing_obstacles(board)
         routing_obstacles = [obstacle for obstacle in obstacles if obstacle.net != victim.GetNetname()]
         spatial = maze.SpatialIndex(routing_obstacles)
         chosen = None
         for bridge_layer in bridge_layers:
-            for distance in (0.70, 0.90, 1.20, 1.60, 2.20, 3.00, 4.00):
+            for distance in (0.30, 0.45, 0.60, 0.70, 0.90, 1.20, 1.60, 2.20, 3.00, 4.00):
                 if distance >= before - 0.05 or distance >= after - 0.05:
                     continue
                 nominal_first = (
@@ -245,12 +279,18 @@ def main() -> int:
                         nominal_second[0] + perpendicular[0] * second_offset,
                         nominal_second[1] + perpendicular[1] * second_offset,
                     )
+                    via_layers = (
+                        {original_layer, bridge_layer}
+                        if {original_layer, bridge_layer} == {pcbnew.In1_Cu, pcbnew.In2_Cu}
+                        else {pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu}
+                    )
                     if not maze.signal_via_is_clear(
                         net_name=victim.GetNetname(),
                         position=first_via,
                         endpoint_pad_ids=set(),
                         edge=edge,
                         obstacles=spatial.query_point(first_via),
+                        via_layers=via_layers,
                     ):
                         continue
                     if not maze.signal_via_is_clear(
@@ -259,6 +299,7 @@ def main() -> int:
                         endpoint_pad_ids=set(),
                         edge=edge,
                         obstacles=spatial.query_point(second_via),
+                        via_layers=via_layers,
                     ):
                         continue
                     # Offset vias require two new approach segments on the
@@ -327,9 +368,9 @@ def main() -> int:
         width = victim.GetWidth()
         board.Remove(victim)
         add_track(board, net, original_layer, width, start, first_via)
-        add_via(board, net, first_via)
+        add_via(board, net, first_via, original_layer, bridge_layer)
         add_path(board, net, bridge_layer, width, bridge_path)
-        add_via(board, net, second_via)
+        add_via(board, net, second_via, original_layer, bridge_layer)
         add_track(board, net, original_layer, width, second_via, end)
         bridges += 1
         print(

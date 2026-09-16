@@ -337,7 +337,7 @@ def build_power() -> None:
         Manufacturer="TI", MPN="CSD16406Q3", LCSC="C2861720")
     passive(b, "R106", "5.1M", R0805, 127.0, 165.1, "BAT_DOUT", "CELL_NEG")
     passive(b, "R107", "5.1M", R0805, 152.4, 165.1, "BAT_COUT", "GND")
-    for index, net in enumerate(("CELL_POS", "CELL_NEG", "BAT_FET_MID", "GND"), start=101):
+    for index, net in ((101, "CELL_POS"), (102, "CELL_NEG"), (104, "GND")):
         add(b, "Connector:TestPoint", f"TP{index}", f"BATTERY {net}",
             "TestPoint:TestPoint_Pad_D1.0mm", 101.6 + (index - 101) * 17.78, 177.8, {"1": net})
 
@@ -449,7 +449,10 @@ def build_power() -> None:
     for index, net in enumerate(("GND", "VBUS_FUSED", "CELL_NEG", "+3V3", "+5V_RAW", "+5V_AUX", "LF_5V"), start=101):
         add(b, "power:PWR_FLAG", f"#FLG{index}", "PWR_FLAG", "", 165.1 + (index - 101) * 12.7, 279.4, {"1": net})
 
-    for index, net in enumerate(("VBUS_USB", "VBUS_FUSED", "VSYS", "+3V3", "+5V_RAW", "+5V_AUX"), start=105):
+    for index, net in (
+        (105, "VBUS_USB"), (107, "VSYS"), (108, "+3V3"),
+        (109, "+5V_RAW"), (110, "+5V_AUX"),
+    ):
         add(b, "Connector:TestPoint", f"TP{index}", f"POWER {net}",
             "TestPoint:TestPoint_Pad_D1.0mm", 177.8 + (index - 105) * 17.78, 292.1, {"1": net})
 
@@ -540,10 +543,6 @@ def build_nfc() -> None:
     add(b, "Device:Antenna_Loop", "AE1", "PCB NFC LOOP - TUNE ON V1",
         "PocketLab_Custom:NFC_Loop_35x27mm_4T_TUNE", 571.5, 266.7,
         {"1": "NFC_LOOP_A", "2": "NFC_LOOP_B"}, Description=NFC_LOOP_DESCRIPTION)
-    add(b, "Connector:TestPoint", "TP301", "NFC_LOADMOD TEST", "TestPoint:TestPoint_Pad_D1.0mm", 584.2, 203.2,
-        {"1": "NFC_LOADMOD"})
-
-
 def build_subghz() -> None:
     b = "04 E07 CC1101 SUB-GHZ"
     # The 10 x 10 mm MM variant exposes a dimensioned 50-ohm ANT castellated

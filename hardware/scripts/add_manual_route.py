@@ -66,7 +66,7 @@ def main() -> None:
         track.SetEnd(pcbnew.VECTOR2I_MM(*end))
         track.SetWidth(pcbnew.FromMM(args.width))
         track.SetLayer(layer)
-        track.SetNet(board.FindNet(args.net))
+        track.SetNetCode(net_code)
         board.Add(track)
 
     via_types = {
@@ -88,7 +88,7 @@ def main() -> None:
         via.SetDrill(pcbnew.FromMM(drill))
         via.SetViaType(via_types[kind])
         via.SetLayerPair(top, bottom)
-        via.SetNet(board.FindNet(args.net))
+        via.SetNetCode(net_code)
         board.Add(via)
 
     if args.fill_zones:

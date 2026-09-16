@@ -31,6 +31,13 @@ def main() -> int:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pair", action="append", type=pair, required=True)
+    parser.add_argument(
+        "--make-kept-through",
+        action="store_true",
+        help="replace each kept stacked via with one F.Cu-B.Cu through via",
+    )
+    parser.add_argument("--through-diameter", type=float, default=0.45)
+    parser.add_argument("--through-drill", type=float, default=0.20)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -47,6 +54,7 @@ def main() -> int:
     all_tracks = list(board.GetTracks())
     by_uuid = {uuid_text(item): item for item in all_tracks}
     removed_items: set[str] = set()
+    kept_items: set[str] = set()
     for remove_uuid, keep_uuid in args.pair:
         removed = by_uuid.get(remove_uuid)
         kept = by_uuid.get(keep_uuid)
@@ -80,10 +88,21 @@ def main() -> int:
                 collapsed_tracks += 1
         board.Remove(removed)
         removed_items.add(remove_uuid)
+        kept_items.add(keep_uuid)
         print(
             f"MERGED net={kept.GetNetname()} remove={remove_uuid} keep={keep_uuid}",
             flush=True,
         )
+
+    if args.make_kept_through:
+        for keep_uuid in kept_items:
+            kept = by_uuid[keep_uuid]
+            if not isinstance(kept, pcbnew.PCB_VIA):
+                raise RuntimeError(f"kept UUID is not a via: {keep_uuid}")
+            kept.SetViaType(pcbnew.VIATYPE_THROUGH)
+            kept.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+            kept.SetWidth(pcbnew.FromMM(args.through_diameter))
+            kept.SetDrill(pcbnew.FromMM(args.through_drill))
 
     board.BuildConnectivity()
     connectivity = board.GetConnectivity()

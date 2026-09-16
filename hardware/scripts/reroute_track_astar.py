@@ -9,7 +9,7 @@ import shutil
 import pcbnew
 
 import route_lf_global as maze
-from route_plane_fanouts import board_rect, existing_obstacles
+from route_plane_fanouts import CopperObstacle, board_rect, existing_obstacles
 
 
 def uuid_text(item: pcbnew.BOARD_ITEM) -> str:
@@ -19,6 +19,11 @@ def uuid_text(item: pcbnew.BOARD_ITEM) -> str:
 
 def xy(position: pcbnew.VECTOR2I) -> tuple[float, float]:
     return pcbnew.ToMM(position.x), pcbnew.ToMM(position.y)
+
+
+def avoid_point(value: str) -> tuple[float, float, float]:
+    x, y, radius = value.split(",", 2)
+    return float(x), float(y), float(radius)
 
 
 def main() -> int:
@@ -40,6 +45,13 @@ def main() -> int:
         help="avoid pads, vias and keepouts while allowing later crossing cleanup",
     )
     parser.add_argument("--ignore-endpoint-cages", action="store_true")
+    parser.add_argument(
+        "--avoid-point",
+        action="append",
+        type=avoid_point,
+        default=[],
+        help="reserve x,y,radius millimetres as a same-layer circular obstacle",
+    )
     parser.add_argument("--fill-zones", action="store_true")
     parser.add_argument("--require-zero-open", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -74,6 +86,10 @@ def main() -> int:
             or (args.static_obstacles_only and obstacle.kind == "via")
         )
     ]
+    routing_obstacles.extend(
+        CopperObstacle("/__REROUTE_KEEPOUT__", "via", ((x, y), radius))
+        for x, y, radius in args.avoid_point
+    )
     maze.GRID_MM = args.grid
     maze.TRACK_WIDTH_MM = width_mm
     maze.DIFFERENT_NET_CLEARANCE_MM = args.clearance
@@ -82,12 +98,15 @@ def main() -> int:
         routing_obstacles = [
             obstacle
             for obstacle in routing_obstacles
-            if not maze.obstacle_rect(obstacle)
-            .expanded(args.clearance + width_mm / 2.0)
-            .contains(start)
-            and not maze.obstacle_rect(obstacle)
-            .expanded(args.clearance + width_mm / 2.0)
-            .contains(end)
+            if obstacle.net == "/__REROUTE_KEEPOUT__"
+            or (
+                not maze.obstacle_rect(obstacle)
+                .expanded(args.clearance + width_mm / 2.0)
+                .contains(start)
+                and not maze.obstacle_rect(obstacle)
+                .expanded(args.clearance + width_mm / 2.0)
+                .contains(end)
+            )
         ]
     layer = board.GetLayerID(args.layer)
     path = maze.find_fixed_layer_path(

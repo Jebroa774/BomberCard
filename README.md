@@ -18,11 +18,11 @@ hand where practical.
 > measurements have been independently checked.
 
 > [!WARNING]
-> **Engineering prototype — not ready to order.** Placement and electrical
-> connectivity are complete: the current routing checkpoint has 0 open
-> connection items. It still has 1,164 DRC findings in the saved median run,
-> so DRC/DFM cleanup, RF/LF tuning, sourcing review and prototype measurements
-> remain required before fabrication.
+> **Engineering prototype — not ready to order.** The current authoritative
+> board has 33 open connection items. KiCad reports 0 geometric/electrical DRC
+> violations; the 7 remaining report entries are footprint-library comparison
+> notices. Routing completion, DFM review, RF/LF tuning, sourcing review and
+> prototype measurements remain required before fabrication.
 
 ## Current hardware
 
@@ -58,7 +58,11 @@ footprints, courtyards and the PCB outline remain the mechanical references.
 </table>
 
 More layout and enclosure notes are available in the
-[design overview](docs/design-overview/README.md).
+[design overview](docs/design-overview/README.md). An interactive WebGL view is
+available as the
+[live PocketLab Card 3D Viewer](https://jebroa774.github.io/PocketLab-Card/).
+Its source is stored in
+[`docs/design-overview/viewer.html`](docs/design-overview/viewer.html).
 
 ## Mechanical target
 
@@ -82,18 +86,17 @@ height and enclosure clearances must be verified against received components.
 | Named logical nets | 181 |
 | Physical PCB nets | 231 |
 | ERC | 0 errors / 0 warnings |
-| Placed footprints | 267 / 267 |
-| Routed checkpoint | 2843 track segments / 575 vias / 23 zones |
-| Remaining connection items | 0 |
-| DRC findings (median of three runs) | 1164 |
-| Footprint-library comparison findings | 5 |
+| Placed footprints | 264 |
+| Routed checkpoint | 4863 track segments / 1019 vias / 24 zones |
+| Remaining connection items | 33 |
+| Geometric/electrical DRC findings | 0 |
+| Footprint-library comparison notices | 7 |
 
 Completed design work includes the full schematic, mechanical placement,
 four-layer stack definition, native USB pair, local converter routes, RTC
 crystal routes, the provisional Sub-GHz feed/pi network and the via-free
-back-side LF RFID analog island. All logical connection items are now closed;
-the active work is reducing the remaining clearance, hole-clearance, short,
-crossing, solder-mask and board-edge DRC findings.
+back-side LF RFID analog island. The active PCB work is closing the final 33
+routing connections while preserving the current zero-error DRC baseline.
 
 ### Before the first PCB order
 

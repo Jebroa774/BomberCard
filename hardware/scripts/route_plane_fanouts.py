@@ -517,6 +517,22 @@ def track_segment_is_clear(
             ):
                 return False
         elif obstacle.kind == "via":
+            via = obstacle.owner
+            if isinstance(via, pcbnew.PCB_VIA):
+                copper_order = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+                try:
+                    first = copper_order.index(via.TopLayer())
+                    last = copper_order.index(via.BottomLayer())
+                except ValueError:
+                    pass
+                else:
+                    lo, hi = sorted((first, last))
+                    if layer not in copper_order[lo : hi + 1]:
+                        # Blind/microvias do not obstruct tracks on copper
+                        # layers that they do not touch.  Treating every via
+                        # as through-board made legal inner-layer corridors
+                        # appear completely sealed.
+                        continue
             center, radius = obstacle.geometry
             if point_segment_distance(center, start, end) < (
                 radius + width_mm / 2.0 + route_clearance

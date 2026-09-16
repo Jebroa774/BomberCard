@@ -307,6 +307,11 @@ def main() -> int:
     parser.add_argument("--net", action="append", required=True)
     parser.add_argument("--strip-planes", action="store_true")
     parser.add_argument(
+        "--signal-inner-layers",
+        action="store_true",
+        help="Mark GND/PWR as signal layers in the temporary DSN only",
+    )
+    parser.add_argument(
         "--split-classes",
         action="store_true",
         help="Keep all nets declared but put unselected nets in IGNORE_* classes",
@@ -336,6 +341,12 @@ def main() -> int:
     report = json.loads(drc_path.read_text(encoding="utf-8"))
     anchors, pins_by_net, edges = selected_anchors(report, selected)
     source = input_path.read_text(encoding="utf-8")
+    if args.signal_inner_layers:
+        source = re.sub(
+            r"(\(layer\s+(?:GND|PWR)\s*\n\s*\(type\s+)power(\))",
+            r"\1signal\2",
+            source,
+        )
     removed_planes = 0
     if args.strip_planes:
         source, removed_planes = strip_structure_planes(source)

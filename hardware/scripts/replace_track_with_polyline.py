@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--uuid", required=True)
     parser.add_argument("--point", action="append", type=parse_point, required=True)
     parser.add_argument("--layer", choices=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"))
+    parser.add_argument("--width", type=float)
     parser.add_argument("--fill-zones", action="store_true")
     parser.add_argument("--require-zero-open", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -57,7 +58,11 @@ def main() -> int:
     ]
     net = original.GetNet()
     layer = board.GetLayerID(args.layer) if args.layer else original.GetLayer()
-    width = original.GetWidth()
+    width = (
+        pcbnew.FromMM(args.width)
+        if args.width is not None
+        else original.GetWidth()
+    )
     locked = original.IsLocked()
     board.Remove(original)
     added = 0

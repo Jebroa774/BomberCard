@@ -55,15 +55,18 @@ def via(
     *,
     size: float,
     drill: float,
+    via_kind: str,
+    via_layers: tuple[str, str],
     net_name: str,
     item_uuid: str,
 ) -> str:
+    kind_suffix = "" if via_kind == "through" else f" {via_kind}"
     return (
-        "\t(via\n"
+        f"\t(via{kind_suffix}\n"
         f"\t\t(at {at[0]:.6f} {at[1]:.6f})\n"
         f"\t\t(size {size:.6f})\n"
         f"\t\t(drill {drill:.6f})\n"
-        "\t\t(layers \"F.Cu\" \"B.Cu\")\n"
+        f"\t\t(layers \"{via_layers[0]}\" \"{via_layers[1]}\")\n"
         "\t\t(locked yes)\n"
         f"\t\t(net \"{net_name}\")\n"
         f"\t\t(uuid \"{item_uuid}\")\n"
@@ -82,6 +85,8 @@ def main() -> int:
     parser.add_argument("--via", type=point, action="append", default=[])
     parser.add_argument("--via-size", type=float, default=0.5)
     parser.add_argument("--via-drill", type=float, default=0.3)
+    parser.add_argument("--via-kind", choices=("through", "micro", "blind"), default="through")
+    parser.add_argument("--via-layers", nargs=2, default=("F.Cu", "B.Cu"))
     parser.add_argument("--remove-uuid", action="append", default=[])
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -125,6 +130,8 @@ def main() -> int:
             at,
             size=args.via_size,
             drill=args.via_drill,
+            via_kind=args.via_kind,
+            via_layers=tuple(args.via_layers),
             net_name=net_match.group(1),
             item_uuid=str(uuid.uuid4()),
         )

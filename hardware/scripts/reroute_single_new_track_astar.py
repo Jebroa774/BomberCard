@@ -66,6 +66,12 @@ def main() -> int:
     parser.add_argument("--uuid", required=True)
     parser.add_argument("--layer", choices=tuple(LAYER_BY_NAME))
     parser.add_argument("--expansion", type=float, default=20.0)
+    parser.add_argument(
+        "--expected-opens",
+        type=int,
+        default=0,
+        help="required ratsnest count after replacement",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -138,8 +144,11 @@ def main() -> int:
     connectivity = board.GetConnectivity()
     connectivity.RecalculateRatsnest()
     opens = int(connectivity.GetUnconnectedCount(False))
-    if opens:
-        raise RuntimeError(f"replacement created {opens} open connection(s)")
+    if opens != args.expected_opens:
+        raise RuntimeError(
+            f"replacement has {opens} open connection(s); "
+            f"expected {args.expected_opens}"
+        )
 
     pcbnew.SaveBoard(str(args.output.resolve()), board)
     for suffix in (".kicad_pro", ".kicad_dru"):

@@ -74,19 +74,43 @@ def add_track(
     return 1
 
 
-def add_through_via(
+def add_layer_via(
     board: pcbnew.BOARD,
     net: pcbnew.NETINFO_ITEM,
     position: tuple[float, float],
+    endpoint_layers: set[int],
+    route_layer: int,
     diameter_mm: float,
     drill_mm: float,
 ) -> None:
+    copper_order = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+    endpoint_layer = min(
+        endpoint_layers,
+        key=lambda layer: abs(copper_order.index(layer) - copper_order.index(route_layer)),
+    )
+    layer_pair = {endpoint_layer, route_layer}
     via = pcbnew.PCB_VIA(board)
     via.SetPosition(pcbnew.VECTOR2I_MM(*position))
     via.SetWidth(pcbnew.FromMM(diameter_mm))
     via.SetDrill(pcbnew.FromMM(drill_mm))
-    via.SetViaType(pcbnew.VIATYPE_THROUGH)
-    via.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
+    if layer_pair in (
+        {pcbnew.F_Cu, pcbnew.In1_Cu},
+        {pcbnew.In2_Cu, pcbnew.B_Cu},
+    ):
+        via.SetViaType(pcbnew.VIATYPE_MICROVIA)
+        via.SetLayerPair(endpoint_layer, route_layer)
+    elif layer_pair == {pcbnew.In1_Cu, pcbnew.In2_Cu}:
+        via.SetViaType(pcbnew.VIATYPE_BURIED)
+        via.SetLayerPair(endpoint_layer, route_layer)
+    elif layer_pair in (
+        {pcbnew.F_Cu, pcbnew.In2_Cu},
+        {pcbnew.In1_Cu, pcbnew.B_Cu},
+    ):
+        via.SetViaType(pcbnew.VIATYPE_BLIND)
+        via.SetLayerPair(endpoint_layer, route_layer)
+    else:
+        via.SetViaType(pcbnew.VIATYPE_THROUGH)
+        via.SetLayerPair(pcbnew.F_Cu, pcbnew.B_Cu)
     via.SetNet(net)
     via.SetLocked(True)
     board.Add(via)
@@ -101,6 +125,16 @@ def choose_layer(first: set[int], second: set[int], index: int) -> int:
     # Mismatched SMD/inner endpoints need a via anyway.  Alternating outer
     # layers distributes the intentionally unchecked first-pass copper.
     return pcbnew.F_Cu if index % 2 == 0 else pcbnew.B_Cu
+
+
+def choose_inner_layer(first: set[int], second: set[int], index: int) -> int:
+    # Prefer the inner layer directly adjacent to SMD endpoints so most fanout
+    # vias are legal one-step microvias instead of plane-cutting through vias.
+    if first == {pcbnew.F_Cu} and second == {pcbnew.F_Cu}:
+        return pcbnew.In1_Cu
+    if first == {pcbnew.B_Cu} and second == {pcbnew.B_Cu}:
+        return pcbnew.In2_Cu
+    return pcbnew.In1_Cu if index % 2 == 0 else pcbnew.In2_Cu
 
 
 def route_points(
@@ -198,7 +232,7 @@ def main() -> int:
         start = point(items[0])
         end = point(items[1])
         if args.routing_mode == "inner":
-            layer = pcbnew.In1_Cu if index % 2 == 0 else pcbnew.In2_Cu
+            layer = choose_inner_layer(first_layers, second_layers, index)
         elif args.routing_mode == "mapped-direct" and net_name in front_nets:
             layer = pcbnew.F_Cu
         elif args.routing_mode == "mapped-direct" and net_name in back_nets:
@@ -210,13 +244,15 @@ def main() -> int:
         else:
             layer = choose_layer(first_layers, second_layers, index)
         if layer not in first_layers:
-            add_through_via(
-                board, net, start, args.via_diameter, args.via_drill
+            add_layer_via(
+                board, net, start, first_layers, layer,
+                args.via_diameter, args.via_drill
             )
             vias += 1
         if layer not in second_layers:
-            add_through_via(
-                board, net, end, args.via_diameter, args.via_drill
+            add_layer_via(
+                board, net, end, second_layers, layer,
+                args.via_diameter, args.via_drill
             )
             vias += 1
         width = args.power_width if net_name in POWER_NETS else args.signal_width

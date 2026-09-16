@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10151d">
+  <title>PocketLab Card — Interactive 3D Viewer</title>
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.1.0/model-viewer.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      background: #10151d;
+      color: #eef4ff;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #253247, #10151d 58%); }
+    header { padding: 1rem 1.25rem .75rem; }
+    h1 { margin: 0 0 .35rem; font-size: clamp(1.25rem, 3vw, 2rem); }
+    p { margin: 0; color: #b8c4d6; line-height: 1.45; }
+    main { padding: 0 1rem 1rem; }
+    model-viewer {
+      width: 100%;
+      height: calc(100vh - 8.5rem);
+      min-height: 32rem;
+      border: 1px solid #3b4b63;
+      border-radius: 1rem;
+      background: linear-gradient(145deg, #e4ebf5, #8fa0b7);
+      box-shadow: 0 1.5rem 4rem #0008;
+      --poster-color: transparent;
+    }
+    .badge {
+      position: absolute;
+      left: 1rem;
+      bottom: 1rem;
+      padding: .55rem .75rem;
+      border-radius: .65rem;
+      background: #10151ddd;
+      color: #dce8fa;
+      font-size: .85rem;
+      pointer-events: none;
+    }
+    footer { padding: 0 1.25rem 1rem; color: #8998ad; font-size: .8rem; }
+    a { color: #8fc7ff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PocketLab Card V1 — interactive PCB model</h1>
+    <p>Drag to rotate, scroll or pinch to zoom, and double-click to reset the view.</p>
+  </header>
+  <main>
+    <model-viewer
+      src="pocketlab-card.glb"
+      poster="card-isometric.png"
+      alt="Interactive 3D model of the PocketLab Card PCB"
+      camera-controls
+      touch-action="pan-y"
+      interaction-prompt="auto"
+      shadow-intensity="0.9"
+      shadow-softness="0.8"
+      environment-image="neutral"
+      exposure="1"
+      camera-orbit="35deg 62deg auto"
+      min-camera-orbit="auto 10deg auto"
+      max-camera-orbit="auto 170deg auto">
+      <div class="badge">KiCad routing checkpoint · 33 open · 0 real DRC errors</div>
+    </model-viewer>
+  </main>
+  <footer>
+    Generated from <a href="../../hardware/PocketLab-Card.kicad_pcb">PocketLab-Card.kicad_pcb</a>.
+    Engineering prototype — not ready for fabrication.
+  </footer>
+</body>
+</html>

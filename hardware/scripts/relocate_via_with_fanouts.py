@@ -27,7 +27,17 @@ def main() -> int:
         choices=("F.Cu", "B.Cu", "In1.Cu", "In2.Cu"),
     )
     parser.add_argument("--fanout-width", type=float, default=0.15)
+    parser.add_argument(
+        "--rewire-connected",
+        action="store_true",
+        help="move track endpoints that touched the old via instead of adding fanouts",
+    )
     parser.add_argument("--skip-fill-zones", action="store_true")
+    parser.add_argument(
+        "--allow-existing-opens",
+        action="store_true",
+        help="permit the board's pre-existing unrouted connections",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -49,6 +59,18 @@ def main() -> int:
     via = matches[0]
     old = via.GetPosition()
     new = pcbnew.VECTOR2I_MM(args.x, args.y)
+
+    rewired = 0
+    if args.rewire_connected:
+        for item in board.GetTracks():
+            if isinstance(item, pcbnew.PCB_VIA) or item.GetNetCode() != via.GetNetCode():
+                continue
+            if item.GetStart() == old:
+                item.SetStart(new)
+                rewired += 1
+            if item.GetEnd() == old:
+                item.SetEnd(new)
+                rewired += 1
     via.SetPosition(new)
 
     layer_by_name = {
@@ -58,6 +80,8 @@ def main() -> int:
         "In2.Cu": pcbnew.In2_Cu,
     }
     fanout_layers = list(dict.fromkeys(args.fanout_layer or []))
+    if args.rewire_connected and fanout_layers:
+        raise RuntimeError("--rewire-connected cannot be combined with --fanout-layer")
     for layer_name in fanout_layers:
         fanout = pcbnew.PCB_TRACK(board)
         fanout.SetStart(old)
@@ -74,7 +98,7 @@ def main() -> int:
     connectivity = board.GetConnectivity()
     connectivity.RecalculateRatsnest()
     opens = int(connectivity.GetUnconnectedCount(False))
-    if opens:
+    if opens and not args.allow_existing_opens:
         raise RuntimeError(f"via relocation created {opens} open connection(s)")
 
     pcbnew.SaveBoard(str(args.output.resolve()), board)
@@ -84,7 +108,7 @@ def main() -> int:
         )
     print(
         f"MOVED via={args.via_uuid} to=({args.x:.4f},{args.y:.4f}) "
-        f"fanouts={','.join(fanout_layers) or 'none'} opens={opens}"
+        f"fanouts={','.join(fanout_layers) or 'none'} rewired={rewired} opens={opens}"
     )
     return 0
 

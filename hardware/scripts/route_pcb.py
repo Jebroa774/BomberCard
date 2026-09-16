@@ -323,6 +323,23 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--allow-existing-critical-vias",
+        action="store_true",
+        help=(
+            "allow reviewed pre-existing vias on manually protected critical nets; "
+            "the guarded SES import must still preserve every original copper item and "
+            "may not add copper on those nets"
+        ),
+    )
+    parser.add_argument(
+        "--allow-stale-design-parity",
+        action="store_true",
+        help=(
+            "route an explicitly selected historical PCB checkpoint even when its "
+            "footprint set intentionally differs from design-netlist.json"
+        ),
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="explicitly replace existing DSN/SES/output staging artifacts",
@@ -1137,12 +1154,16 @@ def dsn_expression_end(text: str, start: int) -> int:
 
 
 def filter_autorouter_network(source: Path, destination: Path) -> tuple[int, int]:
-    """Create a DSN whose network omits every manual net and netclass.
+    """Create a DSN whose manual nets have no routable pin connections.
 
     FreeRouting 2.3's headless path ignores class exclusions.  Removing the
-    protected connections from an autorouter-only copy makes those pads
-    unroutable by construction.  The full DSN remains the publication source,
-    and the SES importer still rejects protected-net copper independently.
+    protected pin lists from an autorouter-only copy makes those nets
+    unroutable by construction.  Their empty net declarations are retained so
+    FreeRouting can still load the existing fixed wires and vias as obstacles;
+    deleting the declarations produces thousands of ``net not found`` warnings
+    and can stall the headless router.  The full DSN remains the publication
+    source, and the SES importer still rejects protected-net copper
+    independently.
     """
     text = source.read_text(encoding="utf-8", errors="strict")
     matches = list(re.finditer(r"(?m)^\s*\(network\b", text))
@@ -1171,10 +1192,12 @@ def filter_autorouter_network(source: Path, destination: Path) -> tuple[int, int
         child_head, atom_offset = dsn_atom(text, child_start + 1)
         child_name, _ = dsn_atom(text, atom_offset)
         remove = False
+        replacement: str | None = None
         if child_head == "net":
             if child_name in manual_physical_nets:
                 seen_manual_nets.add(child_name)
                 remove = True
+                replacement = f"(net {child_name})"
             else:
                 retained_nets += 1
         elif child_head == "class" and child_name in MANUAL_NETCLASSES:
@@ -1182,6 +1205,8 @@ def filter_autorouter_network(source: Path, destination: Path) -> tuple[int, int
 
         if remove:
             pieces.append(text[copy_from:child_start])
+            if replacement is not None:
+                pieces.append(replacement)
             copy_from = child_end
         cursor = child_end
 
@@ -1211,11 +1236,15 @@ def filter_autorouter_network(source: Path, destination: Path) -> tuple[int, int
     filtered_network_end = dsn_expression_end(filtered, filtered_network_start)
     filtered_network = filtered[filtered_network_start:filtered_network_end]
     for net_name in seen_manual_nets:
-        if re.search(
+        match = re.search(
             r"\(net\s+" + re.escape(net_name) + r"(?=\s|\))",
             filtered_network,
-        ):
-            raise RuntimeError(f"Protected net survived autorouter DSN filtering: {net_name}")
+        )
+        if match is None:
+            raise RuntimeError(f"Protected net declaration was lost: {net_name}")
+        net_end = dsn_expression_end(filtered_network, match.start())
+        if "(pins" in filtered_network[match.start():net_end]:
+            raise RuntimeError(f"Protected net still has routable pins: {net_name}")
     if "(resolution um 10)" not in filtered:
         raise RuntimeError("Guarded autorouter requires the expected 10-unit-per-um DSN resolution")
     filtered, clearance_replacements = re.subn(
@@ -1223,9 +1252,9 @@ def filter_autorouter_network(source: Path, destination: Path) -> tuple[int, int
         f"(clearance {AUTOROUTER_CLEARANCE_UNITS})",
         filtered,
     )
-    if clearance_replacements != 2:
+    if clearance_replacements < 2:
         raise RuntimeError(
-            "Expected to strengthen exactly the global and default-class DSN clearances; "
+            "Expected to strengthen at least the global and default-class DSN clearances; "
             f"changed {clearance_replacements}"
         )
     destination.write_text(filtered, encoding="utf-8", newline="\n")
@@ -1337,6 +1366,7 @@ def validate_round_trip(
     original_tracks: Counter[tuple[object, ...]],
     original_zones: Counter[tuple[object, ...]],
     assignments: dict[str, NetClassSpec],
+    allow_existing_critical_vias: bool,
 ) -> None:
     actual_footprints = footprint_snapshot(board)
     if actual_footprints.keys() != original_footprints.keys():
@@ -1406,7 +1436,8 @@ def validate_round_trip(
             + examples
         )
     validate_no_new_inner_tracks(original_tracks, actual_tracks)
-    validate_no_critical_vias(board)
+    if not allow_existing_critical_vias:
+        validate_no_critical_vias(board)
     validate_four_layer_plane_stack(board)
     validate_required_planes(board)
     validate_netclasses(board, assignments)
@@ -1420,6 +1451,7 @@ def save_and_reload_validated(
     original_tracks: Counter[tuple[object, ...]],
     original_zones: Counter[tuple[object, ...]],
     assignments: dict[str, NetClassSpec],
+    allow_existing_critical_vias: bool,
 ) -> tuple[int, int, int]:
     pcbnew.SaveBoard(str(candidate_path), board)
     if not candidate_path.is_file() or candidate_path.stat().st_size < 100:
@@ -1432,6 +1464,7 @@ def save_and_reload_validated(
         original_tracks,
         original_zones,
         assignments,
+        allow_existing_critical_vias,
     )
     return (
         len(list(reloaded.GetFootprints())),
@@ -1482,8 +1515,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     board = pcbnew.LoadBoard(str(input_path))
     layer_names = validate_four_layer_plane_stack(board)
     validate_required_planes(board)
-    validate_no_critical_vias(board)
-    validate_design_parity(board, design_path)
+    if not args.allow_existing_critical_vias:
+        validate_no_critical_vias(board)
+    if not args.allow_stale_design_parity:
+        validate_design_parity(board, design_path)
     original_footprints = footprint_snapshot(board)
     original_nets = board_net_names(board)
     original_tracks = track_snapshot(board)
@@ -1580,6 +1615,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             original_tracks,
             original_zones,
             assignments,
+            args.allow_existing_critical_vias,
         )
 
         candidate_board = scratch / "PocketLab-Card-routed.kicad_pcb"
@@ -1591,6 +1627,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             original_tracks,
             original_zones,
             assignments,
+            args.allow_existing_critical_vias,
         )
 
         # Publish only after the imported board has also survived a KiCad

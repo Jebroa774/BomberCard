@@ -38,9 +38,21 @@ def main() -> int:
         choices=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
         required=True,
     )
+    parser.add_argument(
+        "--start-layer",
+        choices=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
+        help="copper layer of the start anchor; adds a via when it differs from --layer",
+    )
+    parser.add_argument(
+        "--end-layer",
+        choices=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
+        help="copper layer of the end anchor; adds a via when it differs from --layer",
+    )
     parser.add_argument("--grid", type=float, default=0.15)
     parser.add_argument("--width", type=float, default=0.20)
     parser.add_argument("--clearance", type=float, default=0.20)
+    parser.add_argument("--via-diameter", type=float, default=0.30)
+    parser.add_argument("--via-drill", type=float, default=0.10)
     parser.add_argument("--expansion", type=float, default=16.0)
     parser.add_argument("--pad-obstacles-only", action="store_true")
     parser.add_argument(
@@ -76,6 +88,8 @@ def main() -> int:
     maze.GRID_MM = args.grid
     maze.TRACK_WIDTH_MM = args.width
     maze.DIFFERENT_NET_CLEARANCE_MM = args.clearance
+    maze.VIA_DIAMETER_MM = args.via_diameter
+    maze.VIA_DRILL_MM = args.via_drill
     maze.AVOID_L3_ZONE_POLYS = ()
     if args.ignore_endpoint_cages:
         routing_obstacles = [
@@ -101,7 +115,16 @@ def main() -> int:
     if path is None:
         print("FAILED no path")
         return 2
-    route = tuple((x, y, layer) for x, y in path)
+    route_entries = [(x, y, layer) for x, y in path]
+    if args.start_layer:
+        start_layer = board.GetLayerID(args.start_layer)
+        if start_layer != layer:
+            route_entries.insert(0, (args.start[0], args.start[1], start_layer))
+    if args.end_layer:
+        end_layer = board.GetLayerID(args.end_layer)
+        if end_layer != layer:
+            route_entries.append((args.end[0], args.end[1], end_layer))
+    route = tuple(route_entries)
     tracks, vias = maze.add_route(board, args.net, route, obstacles)
     if args.fill_zones:
         pcbnew.ZONE_FILLER(board).Fill(board.Zones())

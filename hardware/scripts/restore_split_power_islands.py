@@ -474,12 +474,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--plane-layer",
-        choices=("In1.Cu", "In2.Cu"),
+        choices=("In1.Cu", "In2.Cu", "B.Cu"),
         default="In2.Cu",
     )
     parser.add_argument(
         "--bridge-layer",
-        choices=("F.Cu", "In1.Cu", "B.Cu"),
+        choices=("F.Cu", "In1.Cu", "In2.Cu", "B.Cu"),
         default="B.Cu",
     )
     parser.add_argument("--force", action="store_true")

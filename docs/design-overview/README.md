@@ -1,7 +1,7 @@
 # PocketLab Card design overview
 
-These KiCad renders show the placement of the current design, not the final
-fabrication appearance. Placement is complete, but 138 connection items remain
+These KiCad renders show the current routing checkpoint, not the final
+fabrication appearance. Placement is complete, but 33 connection items remain
 open. The IR bodies and spring antenna use approximate mechanical preview
 models; the footprint courtyards and board outline remain the manufacturing
 references. RF stitching, several sensitive routes and final enclosure
@@ -14,6 +14,14 @@ clearances are still open.
 | Top | Bottom |
 |---|---|
 | ![Current top view](card-top.png) | ![Current bottom view](card-bottom.png) |
+
+## Interactive 3D viewer
+
+Open [viewer.html](viewer.html) through GitHub Pages or a local static web
+server to rotate, zoom and inspect the exported board model. The viewer loads
+[`pocketlab-card.glb`](pocketlab-card.glb), generated directly from the current
+KiCad PCB. A few footprints have no installed upstream 3D model; their pads and
+board copper remain present in the export.
 
 The ESP32-S3-WROOM-1-N8R2 shown here remains the V1 controller. ESP32-S31 is a
 future V2 candidate and is not part of this PCB revision.
@@ -56,8 +64,7 @@ received-part and enclosure measurements replace this provisional envelope.
 ## Verification status
 
 The current placement and retained routing pass the scripted component/keepout
-audit. Schematic parity and ERC are clean. KiCad DRC reports 16 documented
-non-release findings covering native fine-pitch clearances, one J4 edge-mounted
-copper item, footprint-library checks and one copper-sliver warning. The 138 unconnected
-items are the explicit routing blocker, so this revision
+audit. Schematic parity and ERC are clean. KiCad DRC reports 0
+geometric/electrical violations and 7 footprint-library comparison notices.
+The 33 unconnected items are the explicit routing blocker, so this revision
 must not be sent to fabrication yet.

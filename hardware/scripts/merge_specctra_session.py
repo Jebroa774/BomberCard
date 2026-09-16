@@ -8,9 +8,11 @@ represented by router-only keepouts.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 import re
+import shutil
 
 import pcbnew
 
@@ -224,6 +226,7 @@ def main() -> int:
     added_vias = 0
     skipped_tracks = 0
     skipped_vias = 0
+    new_by_net: dict[str, list[int]] = defaultdict(lambda: [0, 0])
 
     for net_name, item_type, data in session_network_items(session):
         if selected_nets and net_name not in selected_nets:
@@ -255,6 +258,7 @@ def main() -> int:
                 track.SetNet(net)
                 board.Add(track)
                 added_tracks += 1
+                new_by_net[net_name][0] += 1
         elif item_type == "via":
             padstack, x, y = data
             match = VIA_NAME_RE.match(padstack)
@@ -288,9 +292,16 @@ def main() -> int:
             via.SetNet(net)
             board.Add(via)
             added_vias += 1
+            new_by_net[net_name][1] += 1
 
     opens_after = unconnected_count(board)
     pcbnew.SaveBoard(str(output), board)
+    hardware_dir = Path(__file__).resolve().parent.parent
+    for suffix in (".kicad_pro", ".kicad_dru"):
+        shutil.copyfile(
+            hardware_dir / f"PocketLab-Card{suffix}",
+            output.with_suffix(suffix),
+        )
     reloaded = pcbnew.LoadBoard(str(output))
     reload_opens = unconnected_count(reloaded)
     print(
@@ -299,6 +310,8 @@ def main() -> int:
         f"skipped_existing_vias={skipped_vias}, "
         f"opens={opens_before}->{opens_after}, reload_opens={reload_opens}"
     )
+    for net_name, (tracks, vias) in sorted(new_by_net.items()):
+        print(f"NEW_NET {net_name} tracks={tracks} vias={vias}")
     return 0
 
 

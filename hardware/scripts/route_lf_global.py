@@ -49,12 +49,20 @@ from route_plane_fanouts import (
 TRACK_WIDTH_MM = 0.20
 VIA_DIAMETER_MM = 0.50
 VIA_DRILL_MM = 0.30
+MICROVIA_DIAMETER_MM = 0.30
+MICROVIA_DRILL_MM = 0.10
 GRID_MM = 0.25
 ROUTE_EXPANSION_MM = 20.0
 MAX_ROUTE_SEARCH_STATES = 600_000
 MAX_FIXED_LAYER_SEARCH_STATES = 140_000
 INNER_LAYER_COST_MULTIPLIER = 1.0
+ROUTING_LAYER_COST_MULTIPLIERS: dict[int, float] = {}
 ROUTING_LAYERS = (F, B)
+# Reviewed dense-board routes may restrict transitions to adjacent copper
+# layers (microvias) and require a short copper run before another via.  Keep
+# the legacy defaults for the older routing passes.
+ADJACENT_LAYER_VIAS_ONLY = False
+MIN_MOVES_BETWEEN_VIAS = 0
 AVOID_L3_ZONE_POLYS: tuple[pcbnew.SHAPE_POLY_SET, ...] = ()
 ROUTE_PRIORITY = {
     "/SPI_MOSI": 0,
@@ -256,6 +264,7 @@ def signal_via_is_clear(
     endpoint_pad_ids: set[str],
     edge: Rect,
     obstacles: list[CopperObstacle],
+    via_layers: set[int] | None = None,
 ) -> bool:
     radius = VIA_DIAMETER_MM / 2.0
     if not edge.expanded(-(EDGE_CLEARANCE_MM + radius + 0.05)).contains(position):
@@ -287,6 +296,22 @@ def signal_via_is_clear(
                 VIA_DRILL_MM / 2.0 + pad_drill / 2.0 + 0.25 - 1e-6
             ):
                 return False
+        if via_layers is not None:
+            owner = obstacle.owner
+            electrically_relevant = True
+            if obstacle.kind == "track":
+                _, _, _, obstacle_layer = obstacle.geometry
+                electrically_relevant = obstacle_layer in via_layers
+            elif obstacle.kind == "pad":
+                assert isinstance(owner, pcbnew.PAD)
+                electrically_relevant = any(owner.IsOnLayer(layer) for layer in via_layers)
+            elif obstacle.kind == "via":
+                assert isinstance(owner, pcbnew.PCB_VIA)
+                electrically_relevant = any(owner.IsOnLayer(layer) for layer in via_layers)
+            elif obstacle.kind == "copper_graphic" and owner is not None:
+                electrically_relevant = owner.GetLayer() in via_layers
+            if not electrically_relevant:
+                continue
         if obstacle.net == net_name:
             continue
         sibling_clearance = same_family_clearance(net_name, obstacle.net)
@@ -485,7 +510,9 @@ def find_fixed_layer_path(
             ):
                 continue
             step_cost = GRID_MM * (math.sqrt(2.0) if dx_index and dy_index else 1.0)
-            if layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
+            if layer in ROUTING_LAYER_COST_MULTIPLIERS:
+                step_cost *= ROUTING_LAYER_COST_MULTIPLIERS[layer]
+            elif layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
                 step_cost *= INNER_LAYER_COST_MULTIPLIER
             candidate_cost = current_cost + step_cost
             if candidate_cost + 1e-9 >= cost.get(next_state, math.inf):
@@ -580,7 +607,9 @@ def find_fixed_layer_path_to_goals(
             ):
                 continue
             step_cost = GRID_MM * (math.sqrt(2.0) if dx_index and dy_index else 1.0)
-            if layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
+            if layer in ROUTING_LAYER_COST_MULTIPLIERS:
+                step_cost *= ROUTING_LAYER_COST_MULTIPLIERS[layer]
+            elif layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
                 step_cost *= INNER_LAYER_COST_MULTIPLIER
             candidate_cost = current_cost + step_cost
             if candidate_cost + 1e-9 >= cost.get(next_state, math.inf):
@@ -597,9 +626,16 @@ def find_fixed_layer_path_to_goals(
         closest = min(
             min(distance(position, end) for end in ends) for position in positions
         )
+        closest_position = min(
+            positions,
+            key=lambda position: min(distance(position, end) for end in ends),
+        )
         print(
             f"SEARCH_FAILED {debug_label} layer={layer} states={len(cost)} "
-            f"closest={closest:.3f} queue={len(queue)}",
+            f"closest={closest:.3f} at={closest_position[0]:.3f},{closest_position[1]:.3f} "
+            f"bounds={min(p[0] for p in positions):.3f},{min(p[1] for p in positions):.3f}.."
+            f"{max(p[0] for p in positions):.3f},{max(p[1] for p in positions):.3f} "
+            f"queue={len(queue)}",
             flush=True,
         )
     return None
@@ -734,6 +770,7 @@ def find_route(
     end_override: tuple[float, float] | None = None,
     start_layer_override: int | None = None,
     end_layer_override: int | None = None,
+    allow_closest_partial: bool = False,
 ) -> tuple[tuple[float, float, int], ...] | None:
     if (
         start_override is None
@@ -774,19 +811,19 @@ def find_route(
 
     # (grid x, grid y, layer); the grid is anchored at the exact start pad so
     # the first segment always begins at its electrical centre.
-    start_state = (0, 0, start_layer)
-    queue: list[tuple[float, float, tuple[int, int, int]]] = []
+    start_state = (0, 0, start_layer, MIN_MOVES_BETWEEN_VIAS)
+    queue: list[tuple[float, float, tuple[int, int, int, int]]] = []
     heapq.heappush(queue, (distance(start, end), 0.0, start_state))
-    cost: dict[tuple[int, int, int], float] = {start_state: 0.0}
-    previous: dict[tuple[int, int, int], tuple[int, int, int]] = {}
+    cost: dict[tuple[int, int, int, int], float] = {start_state: 0.0}
+    previous: dict[tuple[int, int, int, int], tuple[int, int, int, int]] = {}
     directions = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1))
-    goal_state: tuple[int, int, int] | None = None
+    goal_state: tuple[int, int, int, int] | None = None
 
     while queue and len(cost) < MAX_ROUTE_SEARCH_STATES:
         _, current_cost, state = heapq.heappop(queue)
         if current_cost > cost.get(state, math.inf) + 1e-9:
             continue
-        ix, iy, layer = state
+        ix, iy, layer, moves_since_via = state
         current = (start[0] + ix * GRID_MM, start[1] + iy * GRID_MM)
         if layer == end_layer and distance(current, end) <= 0.65 and track_segment_is_clear(
             net_name=net_name,
@@ -802,7 +839,12 @@ def find_route(
             break
 
         for dx_index, dy_index in directions:
-            next_state = (ix + dx_index, iy + dy_index, layer)
+            next_state = (
+                ix + dx_index,
+                iy + dy_index,
+                layer,
+                min(MIN_MOVES_BETWEEN_VIAS, moves_since_via + 1),
+            )
             next_position = (
                 start[0] + next_state[0] * GRID_MM,
                 start[1] + next_state[1] * GRID_MM,
@@ -821,7 +863,9 @@ def find_route(
             ):
                 continue
             step_cost = GRID_MM * (math.sqrt(2.0) if dx_index and dy_index else 1.0)
-            if layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
+            if layer in ROUTING_LAYER_COST_MULTIPLIERS:
+                step_cost *= ROUTING_LAYER_COST_MULTIPLIERS[layer]
+            elif layer in {pcbnew.In1_Cu, pcbnew.In2_Cu}:
                 step_cost *= INNER_LAYER_COST_MULTIPLIER
             candidate_cost = current_cost + step_cost
             if candidate_cost + 1e-9 >= cost.get(next_state, math.inf):
@@ -835,17 +879,30 @@ def find_route(
         # corridor, permit a via anywhere that is legal.  The high transition
         # cost keeps the number of vias low while still allowing the route to
         # weave through complementary openings on F.Cu and B.Cu.
-        if signal_via_is_clear(
-            net_name=net_name,
-            position=current,
-            endpoint_pad_ids=endpoint_ids,
-            edge=edge,
-            obstacles=spatial.query_point(current),
-        ):
-            for other_layer in ROUTING_LAYERS:
-                if other_layer == layer:
-                    continue
-                via_state = (ix, iy, other_layer)
+        for other_layer in ROUTING_LAYERS:
+            if other_layer == layer:
+                continue
+            copper_order = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+            first_index = copper_order.index(layer)
+            second_index = copper_order.index(other_layer)
+            if ADJACENT_LAYER_VIAS_ONLY and abs(first_index - second_index) != 1:
+                continue
+            if moves_since_via < MIN_MOVES_BETWEEN_VIAS:
+                continue
+            via_layers = set(
+                copper_order[
+                    min(first_index, second_index) : max(first_index, second_index) + 1
+                ]
+            )
+            if signal_via_is_clear(
+                net_name=net_name,
+                position=current,
+                endpoint_pad_ids=endpoint_ids,
+                edge=edge,
+                obstacles=spatial.query_point(current),
+                via_layers=via_layers,
+            ):
+                via_state = (ix, iy, other_layer, 0)
                 if current_cost + 2.5 >= cost.get(via_state, math.inf):
                     continue
                 cost[via_state] = current_cost + 2.5
@@ -859,21 +916,49 @@ def find_route(
                     ),
                 )
 
+    reached_goal = goal_state is not None
     if goal_state is None:
-        for debug_layer in (F, B):
+        for debug_layer in ROUTING_LAYERS:
             layer_states = [state for state in cost if state[2] == debug_layer]
             if layer_states:
                 positions = [
                     (start[0] + state[0] * GRID_MM, start[1] + state[1] * GRID_MM)
                     for state in layer_states
                 ]
+                closest_position = min(positions, key=lambda p: distance(p, end))
+                closest_distance = distance(closest_position, end)
                 print(
-                    f"Search {net_name} {'F.Cu' if debug_layer == F else 'B.Cu'}: "
+                    f"Search {net_name} layer={debug_layer}: "
                     f"states={len(layer_states)}, x={min(p[0] for p in positions):.2f}..{max(p[0] for p in positions):.2f}, "
                     f"y={min(p[1] for p in positions):.2f}..{max(p[1] for p in positions):.2f}, "
-                    f"closest={min(distance(p, end) for p in positions):.2f} mm"
+                    f"closest={closest_distance:.2f} mm "
+                    f"at={closest_position[0]:.2f},{closest_position[1]:.2f}"
                 )
-        return None
+        if not allow_closest_partial or not cost:
+            return None
+        # Candidate-only diagnostic mode: retain the best fully checked path
+        # found by the maze so the small local cage at the destination can be
+        # reviewed independently.  Normal callers keep the legacy all-or-
+        # nothing behavior through the default ``False`` value above.
+        goal_state = min(
+            cost,
+            key=lambda state: distance(
+                (
+                    start[0] + state[0] * GRID_MM,
+                    start[1] + state[1] * GRID_MM,
+                ),
+                end,
+            ),
+        )
+        partial_position = (
+            start[0] + goal_state[0] * GRID_MM,
+            start[1] + goal_state[1] * GRID_MM,
+        )
+        print(
+            f"PARTIAL {net_name} layer={goal_state[2]} "
+            f"at={partial_position[0]:.3f},{partial_position[1]:.3f} "
+            f"remaining={distance(partial_position, end):.3f} mm"
+        )
     states = [goal_state]
     while states[-1] != start_state:
         states.append(previous[states[-1]])
@@ -882,7 +967,8 @@ def find_route(
         (start[0] + state[0] * GRID_MM, start[1] + state[1] * GRID_MM, state[2])
         for state in states
     ]
-    raw.append((end[0], end[1], end_layer))
+    if reached_goal:
+        raw.append((end[0], end[1], end_layer))
 
     # Simplify only within one layer; a repeated position with a layer change
     # is retained as the explicit via site.
@@ -950,23 +1036,27 @@ def add_route(
                 raise RuntimeError(f"LF layer change moved position on {net_name}")
             via = pcbnew.PCB_VIA(board)
             via.SetPosition(point(start[0], start[1]))
-            via.SetWidth(pcbnew.FromMM(VIA_DIAMETER_MM))
-            via.SetDrill(pcbnew.FromMM(VIA_DRILL_MM))
             layer_pair = {start[2], end[2]}
-            if layer_pair in (
-                {pcbnew.F_Cu, pcbnew.In1_Cu},
-                {pcbnew.In2_Cu, pcbnew.B_Cu},
-            ):
+            copper_order = (pcbnew.F_Cu, pcbnew.In1_Cu, pcbnew.In2_Cu, pcbnew.B_Cu)
+            if abs(copper_order.index(start[2]) - copper_order.index(end[2])) == 1:
                 via.SetViaType(pcbnew.VIATYPE_MICROVIA)
-            elif layer_pair == {pcbnew.In1_Cu, pcbnew.In2_Cu}:
-                via.SetViaType(pcbnew.VIATYPE_BURIED)
+                via_diameter = MICROVIA_DIAMETER_MM
+                via_drill = MICROVIA_DRILL_MM
             else:
                 via.SetViaType(pcbnew.VIATYPE_THROUGH)
+                via_diameter = VIA_DIAMETER_MM
+                via_drill = VIA_DRILL_MM
+            via.SetWidth(pcbnew.FromMM(via_diameter))
+            via.SetDrill(pcbnew.FromMM(via_drill))
             via.SetLayerPair(start[2], end[2])
-            via.SetNet(net)
+            # KiCad 10's Python binding can retain the wrong NETINFO_ITEM
+            # wrapper when SetNet() is used while adding several objects to a
+            # loaded board.  Assigning the stable numeric code avoids routes
+            # being serialized under a neighbouring net name.
+            via.SetNetCode(net.GetNetCode())
             via.SetLocked(True)
             board.Add(via)
-            obstacles.append(CopperObstacle(net_name, "via", ((start[0], start[1]), VIA_DIAMETER_MM / 2.0), via))
+            obstacles.append(CopperObstacle(net_name, "via", ((start[0], start[1]), via_diameter / 2.0), via))
             vias += 1
             continue
         if distance((start[0], start[1]), (end[0], end[1])) <= 0.001:
@@ -976,7 +1066,7 @@ def add_route(
         segment.SetEnd(point(end[0], end[1]))
         segment.SetWidth(pcbnew.FromMM(TRACK_WIDTH_MM))
         segment.SetLayer(start[2])
-        segment.SetNet(net)
+        segment.SetNetCode(net.GetNetCode())
         segment.SetLocked(True)
         board.Add(segment)
         obstacles.append(

@@ -27,6 +27,11 @@ def main() -> int:
     )
     parser.add_argument("--fanout-width", type=float, default=0.15)
     parser.add_argument("--skip-fill-zones", action="store_true")
+    parser.add_argument(
+        "--allow-opens",
+        action="store_true",
+        help="save diagnostic outputs even when the relocation creates opens",
+    )
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
@@ -80,7 +85,7 @@ def main() -> int:
     connectivity = board.GetConnectivity()
     connectivity.RecalculateRatsnest()
     opens = int(connectivity.GetUnconnectedCount(False))
-    if opens:
+    if opens and not args.allow_opens:
         raise RuntimeError(f"via relocation created {opens} open connection(s)")
 
     pcbnew.SaveBoard(str(args.output.resolve()), board)

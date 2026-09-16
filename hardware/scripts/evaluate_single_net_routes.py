@@ -81,6 +81,13 @@ def counts(report_path: Path) -> tuple[int, int, dict[str, int]]:
     )
 
 
+def refill_zones(pcb_path: Path) -> None:
+    """Rebuild zone fills after transplanted copper changes clearances."""
+    board = pcbnew.LoadBoard(str(pcb_path))
+    pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+    pcbnew.SaveBoard(str(pcb_path), board)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", type=Path, required=True)
@@ -126,6 +133,7 @@ def main() -> int:
 
     # Establish authoritative base counts using the same temporary project.
     pcb_path.write_text(base_text, encoding="utf-8", newline="\n")
+    refill_zones(pcb_path)
     subprocess.run(
         [
             str(args.kicad_cli.resolve()),
@@ -149,6 +157,7 @@ def main() -> int:
     for index, net in enumerate(nets, 1):
         blocks = [source_blocks[item_uuid] for item_uuid in new_uuids_by_net[net]]
         pcb_path.write_text(insert_blocks(base_text, blocks), encoding="utf-8", newline="\n")
+        refill_zones(pcb_path)
         subprocess.run(
             [
                 str(args.kicad_cli.resolve()),
