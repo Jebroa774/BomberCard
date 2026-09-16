@@ -1,4 +1,4 @@
-# PocketLab Card design overview
+# BomberCard design overview
 
 These KiCad renders show the current routing checkpoint, not the final
 fabrication appearance. Placement is complete, but 33 connection items remain

@@ -1,10 +1,10 @@
-# PocketLab Card V1
+# BomberCard V1
 
 <p align="center">
-  <img src="docs/design-overview/card-isometric.png" alt="PocketLab Card V1 current KiCad isometric view" width="900">
+  <img src="docs/design-overview/card-isometric.png" alt="BomberCard V1 current KiCad isometric view" width="900">
 </p>
 
-PocketLab Card V1 is an original, credit-card-outline ESP32-S3 field tool with
+BomberCard V1 is an original, credit-card-outline ESP32-S3 field tool with
 Wi-Fi/BLE control, NFC, LF RFID, Sub-GHz, infrared, removable storage and a
 small local user interface. The hardware is designed around a four-layer PCB,
 a single-cell LiPo supply and parts that can be assembled by JLCPCB or fitted by
@@ -60,7 +60,7 @@ footprints, courtyards and the PCB outline remain the mechanical references.
 More layout and enclosure notes are available in the
 [design overview](docs/design-overview/README.md). An interactive WebGL view is
 available as the
-[live PocketLab Card 3D Viewer](https://jebroa774.github.io/PocketLab-Card/).
+[live BomberCard 3D Viewer](https://jebroa774.github.io/BomberCard/).
 Its source is stored in
 [`docs/design-overview/viewer.html`](docs/design-overview/viewer.html).
 
@@ -117,7 +117,7 @@ The detailed hand-off state is maintained in the
 ## Repository layout
 
 ```text
-PocketLab-Card/
+BomberCard/
 |-- docs/           Architecture, constraints, checkpoints and current renders
 |-- hardware/       KiCad source, local libraries, reports and layout helpers
 |-- firmware/       ESP32-S3 firmware source and board configuration

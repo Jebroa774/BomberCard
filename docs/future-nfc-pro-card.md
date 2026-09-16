@@ -1,11 +1,11 @@
 # Future concept: PocketLab NFC Pro
 
-Status: parked for later; not part of the current PocketLab Card V1 routing.
+Status: parked for later; not part of the current BomberCard V1 routing.
 
 ## Decision
 
 Build the maximum-performance NFC system as a separate card. Do not add it to
-the current multifunction PocketLab Card. A dedicated board gives the antenna,
+the current multifunction BomberCard. A dedicated board gives the antenna,
 matching network, sensitive analogue paths and real-time processing enough
 space and avoids interference from Wi-Fi, displays, IR and the other power
 domains.
@@ -91,4 +91,4 @@ When this project is resumed:
    (integrated protocol/product path).
 3. Fix the antenna outline and target inductance before placing electronics.
 4. Create the schematic, RF matching worksheet and power budget as a new
-   project rather than modifying PocketLab Card V1.
+   project rather than modifying BomberCard V1.

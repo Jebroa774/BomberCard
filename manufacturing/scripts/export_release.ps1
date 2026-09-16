@@ -250,7 +250,7 @@ if ($boardText -match '(?i)PLACEMENT-DRAFT|UNROUTED|NOT FOR PRODUCTION|routing (
 }
 
 $summary = @(
-    "PocketLab Card release check: $ReleaseName",
+    "BomberCard release check: $ReleaseName",
     "KiCad: $kicadVersion",
     "Git commit: $gitCommit",
     "Git dirty: $gitDirty",
@@ -422,7 +422,7 @@ Invoke-KiCad -Description 'Excellon drill files and drill map' -Arguments @(
 
 Invoke-KiCad -Description 'IPC-D-356 electrical netlist' -Arguments @(
     'pcb', 'export', 'ipcd356',
-    '--output', (Join-Path $releaseDir 'PocketLab-Card.ipc'),
+    '--output', (Join-Path $releaseDir 'BomberCard.ipc'),
     $board
 )
 
@@ -445,7 +445,7 @@ foreach ($supportFile in @('assembly-variants.csv', 'preliminary-bom.csv')) {
 Copy-Item -LiteralPath (Join-Path $manufacturingDir 'README.md') -Destination $sourceDir
 
 $metadata = [PSCustomObject][ordered]@{
-    project = 'PocketLab-Card'
+    project = 'BomberCard'
     release_name = $ReleaseName
     generated_utc = [DateTime]::UtcNow.ToString('o')
     kicad_version = $kicadVersion
@@ -475,7 +475,7 @@ $manifestLines = foreach ($file in @(Get-ChildItem -LiteralPath $releaseDir -Fil
 }
 $manifestLines | Set-Content -LiteralPath $manifestPath -Encoding ASCII
 
-$zipPath = Join-Path $manufacturingDir ("PocketLab-Card-{0}.zip" -f $ReleaseName)
+$zipPath = Join-Path $manufacturingDir ("BomberCard-{0}.zip" -f $ReleaseName)
 $zipHashPath = "$zipPath.sha256"
 if ((Test-Path -LiteralPath $zipPath) -or (Test-Path -LiteralPath $zipHashPath)) {
     if (-not $Force) {

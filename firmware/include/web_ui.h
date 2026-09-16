@@ -10,7 +10,7 @@ inline constexpr char WEB_UI[] PROGMEM = R"HTML(<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101827">
-  <title>PocketLab Card</title>
+  <title>BomberCard</title>
   <style>
     :root{color-scheme:dark;--bg:#0a0f1b;--panel:#111a2a;--line:#25334a;--text:#ecf3ff;--muted:#91a2bd;--accent:#41d3a2;--warn:#ffca68;--bad:#ff7185}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 80% 0,#172b43 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.45 system-ui,sans-serif}
@@ -24,7 +24,7 @@ inline constexpr char WEB_UI[] PROGMEM = R"HTML(<!doctype html>
   </style>
 </head>
 <body>
-  <header><div><h1>PocketLab Card</h1><div class="subtitle">Lokales Hardware-Dashboard</div></div><div id="connection" class="pill">Verbinde …</div></header>
+  <header><div><h1>BomberCard</h1><div class="subtitle">Lokales Hardware-Dashboard</div></div><div id="connection" class="pill">Verbinde …</div></header>
   <main>
     <section class="card"><h2>Gerät</h2><div class="metric" id="uptime">–</div><div class="muted">Laufzeit</div><div class="row"><span>Firmware</span><span class="tag" id="version">–</span></div><div class="row"><span>Freier Heap</span><span id="heap">–</span></div></section>
     <section class="card wide"><h2>125-kHz LF-RFID</h2><div class="stack"><div class="row"><span>Versorgung</span><span id="lfPower">aus</span></div><div class="row"><span>HTRC110-Verbindung</span><span id="lfTransport">–</span></div><div class="row"><span>Antenne</span><span id="lfAntenna">–</span></div><div class="row"><span>Phase / Abtastwert</span><span class="tag" id="lfPhase">–</span></div></div><div class="actions"><button class="primary" id="lfOn">Einschalten</button><button id="lfTest">Selbsttest</button><button id="lfOff">Ausschalten</button></div><div class="muted">Der Selbsttest prüft Interface, Phasenmessung und Antennenfehler. Tag-Protokolle werden danach einzeln ergänzt.</div><div id="lfNotice" class="notice"></div></section>
@@ -38,7 +38,7 @@ const $=id=>document.getElementById(id);let token='',currentPath='/',ws,retry,ws
 const text=(id,value)=>$(id).textContent=value;
 const humanBytes=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KiB':(n/1048576).toFixed(1)+' MiB';
 const duration=ms=>{const s=Math.floor(ms/1000),h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return `${h}h ${m}m ${s%60}s`};
-async function request(path,options={}){options.headers={...(options.headers||{}),'X-PocketLab-Token':token};const r=await fetch(path,options);const data=await r.json().catch(()=>({ok:false,error:'invalid_response'}));if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);return data}
+async function request(path,options={}){options.headers={...(options.headers||{}),'X-BomberCard-Token':token};const r=await fetch(path,options);const data=await r.json().catch(()=>({ok:false,error:'invalid_response'}));if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);return data}
 function yesNo(v){return v?'bereit':'nicht erkannt'}
 function render(s){
   $('connection').className='pill ok';text('connection','Live');text('uptime',duration(s.uptimeMs));text('version',s.firmware.version);text('heap',humanBytes(s.freeHeap));

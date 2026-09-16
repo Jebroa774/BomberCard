@@ -16,9 +16,9 @@
 
 namespace pocketlab::config {
 
-inline constexpr char FIRMWARE_NAME[] = "PocketLab Card";
+inline constexpr char FIRMWARE_NAME[] = "BomberCard";
 inline constexpr char FIRMWARE_VERSION[] = "0.4.0-dev";
-inline constexpr char HOSTNAME[] = "pocketlab-card";
+inline constexpr char HOSTNAME[] = "bombercard";
 
 inline constexpr uint16_t HTTP_PORT = 80;
 inline constexpr uint16_t WEBSOCKET_PORT = 81;

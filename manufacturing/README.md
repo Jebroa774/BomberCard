@@ -1,8 +1,8 @@
-# PocketLab Card manufacturing handoff
+# BomberCard manufacturing handoff
 
 This directory contains the reproducible KiCad 10 export pipeline. Generated
 files are intentionally ignored by Git; reviewed release archives are created
-as `manufacturing/PocketLab-Card-<release>.zip`.
+as `manufacturing/BomberCard-<release>.zip`.
 
 > **Current status:** `hardware/PocketLab-Card.kicad_pcb` is still marked as a
 > placement/routing draft. It is not order-ready. The exporter runs ERC and DRC

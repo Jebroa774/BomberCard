@@ -22,7 +22,7 @@ bool WebPortal::begin() {
   const uint32_t passwordSeed = static_cast<uint32_t>((chipId >> 16) ^ chipId ^ 0xA73C91E5UL);
   char ssidBuffer[24];
   char passwordBuffer[16];
-  snprintf(ssidBuffer, sizeof(ssidBuffer), "PocketLab-%06lX",
+  snprintf(ssidBuffer, sizeof(ssidBuffer), "BomberCard-%06lX",
            static_cast<unsigned long>(suffix));
   snprintf(passwordBuffer, sizeof(passwordBuffer), "PL-%08lX",
            static_cast<unsigned long>(passwordSeed));
@@ -45,7 +45,7 @@ bool WebPortal::begin() {
   }
 
   configureRoutes();
-  const char *trackedHeaders[] = {"X-PocketLab-Token"};
+  const char *trackedHeaders[] = {"X-BomberCard-Token"};
   server_.collectHeaders(trackedHeaders, 1);
   server_.begin();
 
@@ -126,8 +126,8 @@ void WebPortal::sendError(int code, const __FlashStringHelper *error) {
 }
 
 bool WebPortal::authorizeMutation() {
-  if (server_.hasHeader(F("X-PocketLab-Token")) &&
-      server_.header(F("X-PocketLab-Token")) == sessionToken_) {
+  if (server_.hasHeader(F("X-BomberCard-Token")) &&
+      server_.header(F("X-BomberCard-Token")) == sessionToken_) {
     return true;
   }
   sendError(403, F("invalid_session_token"));
@@ -266,8 +266,8 @@ void WebPortal::handleFileDelete() {
 void WebPortal::handleUploadChunk() {
   HTTPUpload &upload = server_.upload();
   if (upload.status == UPLOAD_FILE_START) {
-    uploadAuthorized_ = server_.hasHeader(F("X-PocketLab-Token")) &&
-                        server_.header(F("X-PocketLab-Token")) == sessionToken_;
+    uploadAuthorized_ = server_.hasHeader(F("X-BomberCard-Token")) &&
+                        server_.header(F("X-BomberCard-Token")) == sessionToken_;
     uploadSucceeded_ = false;
     uploadError_ = String();
     if (!uploadAuthorized_) {

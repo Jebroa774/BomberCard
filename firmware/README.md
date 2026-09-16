@@ -1,4 +1,4 @@
-# PocketLab Card firmware
+# BomberCard firmware
 
 Buildable ESP32-S3 bring-up firmware for hardware revision 1. It targets the
 ESP32-S3-WROOM-1-N8R2 with Arduino-ESP32 3.x and PlatformIO.
@@ -54,7 +54,7 @@ An open or shorted divider is treated fail-safe like an overtemperature event.
 Read-only endpoints include `/healthz`, `/api/config`, `/api/status`,
 `/api/hardware`, `/api/gpio`, `/api/files` and `/api/file`.
 
-Mutations require the current `X-PocketLab-Token` header:
+Mutations require the current `X-BomberCard-Token` header:
 
 | Method | Path | Purpose |
 |---|---|---|
